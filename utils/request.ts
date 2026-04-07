@@ -8,13 +8,18 @@ const TOKEN_VALUE_KEY = 'tokenValue';
 const API_KEY_STORAGE_KEY = 'fishpi_api_key';
 
 class Request {
-  private instance: AxiosInstance;
+  private _instance: AxiosInstance;
+
+  // 获取 axios 实例
+  get instance(): AxiosInstance {
+    return this._instance;
+  }
 
   constructor() {
-    this.instance = axios.create(API_CONFIG);
+    this._instance = axios.create(API_CONFIG);
 
     // 请求拦截器
-    this.instance.interceptors.request.use(
+    this._instance.interceptors.request.use(
       async (config) => {
         // 优先使用新的 token 认证方式
         const tokenName = await this.getTokenName();
@@ -69,7 +74,7 @@ class Request {
     );
 
     // 响应拦截器
-    this.instance.interceptors.response.use(
+    this._instance.interceptors.response.use(
       (response) => {
         const res = response.data;
         console.log('API响应:', res);
@@ -162,18 +167,18 @@ class Request {
 
   // GET 请求
   async get<T = any>(path: string, params: Record<string, any> = {}): Promise<T> {
-    return this.instance.get(path, { params });
+    return this._instance.get(path, { params });
   }
 
   // POST 请求
   async post<T = any>(path: string, data: any = {}, config: AxiosRequestConfig = {}): Promise<T> {
-    return this.instance.post(path, data, config);
+    return this._instance.post(path, data, config);
   }
 
   // POST 请求（text/plain Content-Type）
   async postText<T = any>(path: string, data: string = ''): Promise<T> {
     // 使用 text/plain Content-Type 发送纯字符串
-    return this.instance.post(path, data, {
+    return this._instance.post(path, data, {
       headers: {
         'Content-Type': 'text/plain;charset=UTF-8',
       },
@@ -190,17 +195,17 @@ class Request {
 
   // PUT 请求
   async put<T = any>(path: string, data: any = {}): Promise<T> {
-    return this.instance.put(path, data);
+    return this._instance.put(path, data);
   }
 
   // DELETE 请求
   async delete<T = any>(path: string): Promise<T> {
-    return this.instance.delete(path);
+    return this._instance.delete(path);
   }
 
   // 文件上传
   async upload<T = any>(path: string, files: FormData): Promise<T> {
-    return this.instance.post(path, files, {
+    return this._instance.post(path, files, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
