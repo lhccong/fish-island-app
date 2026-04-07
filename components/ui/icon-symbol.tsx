@@ -24,6 +24,10 @@ const MAPPING = {
   'chevron.down': 'keyboard-arrow-down',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
+  'chevron.left': 'chevron-left',
+  'camera': 'photo-camera',
+  'photo': 'photo-library',
+  'xmark': 'close',
 } as IconMapping;
 
 /**

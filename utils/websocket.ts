@@ -67,7 +67,7 @@ class WebSocketManager extends SimpleEventEmitter {
   constructor() {
     super();
     // 监听窗口焦点变化（仅在 web 环境）
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('focus', () => {
         this.connections.forEach((_, connectionId) => {
           this.isWindowFocused.set(connectionId, true);
@@ -103,7 +103,7 @@ class WebSocketManager extends SimpleEventEmitter {
     this.isConnecting.set(connectionId, true);
     this.isManualClose.set(connectionId, false);
     this.isMessageProcessingPaused.set(connectionId, false);
-    this.isWindowFocused.set(connectionId, document?.hasFocus?.() ?? true);
+    this.isWindowFocused.set(connectionId, true);
 
     // 保存原始URL和选项，用于重连
     this.originalUrls.set(connectionId, url);

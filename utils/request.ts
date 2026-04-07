@@ -204,11 +204,10 @@ class Request {
   }
 
   // 文件上传
-  async upload<T = any>(path: string, files: FormData): Promise<T> {
+  async upload<T = any>(path: string, files: FormData, params?: Record<string, any>): Promise<T> {
+    // 不手动设置 Content-Type，让 axios 自动处理 multipart boundary
     return this._instance.post(path, files, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+      params,
     });
   }
 }
