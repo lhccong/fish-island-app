@@ -4,6 +4,7 @@
  */
 
 import { Platform } from 'react-native';
+import { MD3DarkTheme, MD3LightTheme } from 'react-native-paper';
 
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
@@ -25,6 +26,34 @@ export const Colors = {
     tabIconDefault: '#9BA1A6',
     tabIconSelected: tintColorDark,
   },
+};
+
+// react-native-paper 主题
+export const paperLightTheme = {
+  ...MD3LightTheme,
+  colors: {
+    ...MD3LightTheme.colors,
+    primary: '#007AFF',
+    primaryContainer: '#E3F2FD',
+    secondary: '#00C853',
+    error: '#FF3B30',
+    background: '#F5F5F5',
+    surface: '#FFFFFF',
+  },
+  roundness: 12,
+};
+
+export const paperDarkTheme = {
+  ...MD3DarkTheme,
+  colors: {
+    ...MD3DarkTheme.colors,
+    primary: '#0A84FF',
+    secondary: '#30D158',
+    error: '#FF453A',
+    background: '#000000',
+    surface: '#1C1C1E',
+  },
+  roundness: 12,
 };
 
 export const Fonts = Platform.select({
