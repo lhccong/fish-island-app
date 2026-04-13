@@ -558,11 +558,11 @@ export default function ChatroomScreen() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
-        
+
         try {
           // Show loading state
           setIsUploading(true);
-          
+
           // Upload image to server
           const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
           const fileName = `image_${Date.now()}.${ext}`;
@@ -570,10 +570,10 @@ export default function ChatroomScreen() {
 
           if (uploadResponse && uploadResponse.code === 0) {
             const imageUrl = uploadResponse.data;
-            
+
             // Create image message with uploaded URL
             const imageContent = `[img]${imageUrl}[/img]`;
-            
+
             // Create optimistic message
             const optimisticMsg: ChatMessage = {
               oId: `optimistic-${Date.now()}`,
@@ -697,7 +697,7 @@ export default function ChatroomScreen() {
       <View style={[styles.header, { backgroundColor: theme.card }]}>
         <View style={styles.headerLeft}>
           <Text style={[styles.headerTitle, { color: theme.text }]}>
-            聊天室
+            摸鱼岛
           </Text>
           <View style={[styles.connectionStatus, { backgroundColor: isConnected ? '#4CAF50' : '#FF6B6B' }]} />
         </View>
@@ -1000,7 +1000,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 4,
   },
   messageBubbleSelf: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FFB347',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 4,
   },

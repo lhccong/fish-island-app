@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "fish-island-app",
-    "slug": "fish-island-app",
+    "name": "摸鱼岛",
+    "slug": "moyu-island",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -12,14 +12,16 @@
       "supportsTablet": true
     },
     "android": {
+      "icon": "./assets/images/icon.png",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundColor": "#FFF3E0",
+        "foregroundImage": "./assets/images/icon.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.lhccong.fishislandapp"
     },
     "web": {
       "output": "static",
@@ -33,9 +35,9 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#FFF3E0",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#1e1e1e"
           }
         }
       ],
@@ -44,6 +46,19 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "271a05c3-c474-4a99-9e91-a4641754ff5e"
+      }
+    },
+    "owner": "moyu-island",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/271a05c3-c474-4a99-9e91-a4641754ff5e"
     }
   }
 }

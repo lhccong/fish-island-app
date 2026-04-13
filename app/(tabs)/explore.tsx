@@ -1,112 +1,396 @@
 import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+import { Colors, Fonts } from '@/constants/theme';
+import { useUser } from '@/contexts/UserContext';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
-export default function TabTwoScreen() {
+export default function ProfileScreen() {
+  const { isLoggedIn, userInfo, logout, refreshUserInfo } = useUser();
+  const router = useRouter();
+  const colorScheme = useColorScheme();
+  const theme = Colors[colorScheme ?? 'light'];
+  const isDark = colorScheme === 'dark';
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      refreshUserInfo();
+    }
+  }, [isLoggedIn]);
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/login');
+  };
+
+  const handleLogin = () => {
+    router.push('/login');
+  };
+
+  // 未登录状态
+  if (!isLoggedIn) {
+    return (
+      <ScrollView
+        style={[styles.scrollView, { backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5' }]}
+        contentContainerStyle={styles.scrollContent}>
+        <View style={[styles.headerBg, { backgroundColor: theme.tint }]} />
+        <View style={styles.unauthCard}>
+          <View style={[styles.avatarPlaceholder, { backgroundColor: isDark ? '#333' : '#e0e0e0' }]}>
+            <IconSymbol size={60} color="#808080" name="person.fill" />
+          </View>
+          <ThemedText type="title" style={{ fontFamily: Fonts.rounded, marginTop: 20 }}>
+            个人信息
+          </ThemedText>
+          <ThemedText style={styles.hintText}>您尚未登录，请先登录</ThemedText>
+          <TouchableOpacity
+            style={[styles.loginButton, { backgroundColor: theme.tint }]}
+            onPress={handleLogin}>
+            <ThemedText style={styles.loginButtonText}>去登录</ThemedText>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    );
+  }
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
+    <ScrollView
+      style={[styles.scrollView, { backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5' }]}
+      contentContainerStyle={styles.scrollContent}>
+      {/* 顶部渐变背景 */}
+      <View style={[styles.headerBg, { backgroundColor: theme.tint }]} />
+
+      {/* 头像卡片 */}
+      <View style={styles.profileCard}>
+        <View style={styles.avatarWrapper}>
+          {userInfo?.userAvatar ? (
+            <Image
+              source={{ uri: userInfo.userAvatar }}
+              style={styles.avatar}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={[styles.avatarPlaceholder, { backgroundColor: isDark ? '#444' : '#e0e0e0' }]}>
+              <IconSymbol size={50} color="#808080" name="person.fill" />
+            </View>
+          )}
+        </View>
+
+        {/* 用户名 */}
+        <ThemedText type="title" style={[styles.nickname, { fontFamily: Fonts.rounded }]}>
+          {userInfo?.userNickname || userInfo?.userName || '用户'}
         </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
+        <ThemedText style={styles.username}>@{userInfo?.userName}</ThemedText>
+
+        {/* VIP 标识 */}
+        {userInfo?.vip && (
+          <View style={styles.vipBadge}>
+            <IconSymbol size={12} color="#FFD700" name="gift.fill" />
+            <ThemedText style={styles.vipText}>VIP</ThemedText>
+          </View>
+        )}
+      </View>
+
+      {/* 统计卡片 */}
+      <View style={[styles.statsCard, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}>
+        <TouchableOpacity style={styles.statItem}>
+          <ThemedText style={styles.statValue}>{userInfo?.points || userInfo?.userPoint || 0}</ThemedText>
+          <ThemedText style={styles.statLabel}>积分</ThemedText>
+        </TouchableOpacity>
+        <View style={styles.statDivider} />
+        <TouchableOpacity style={styles.statItem}>
+          <ThemedText style={styles.statValue}>{userInfo?.level || 1}</ThemedText>
+          <ThemedText style={styles.statLabel}>等级</ThemedText>
+        </TouchableOpacity>
+        <View style={styles.statDivider} />
+        <TouchableOpacity style={styles.statItem}>
+          <ThemedText style={styles.statValue}>{userInfo?.followingUserCount || 0}</ThemedText>
+          <ThemedText style={styles.statLabel}>关注</ThemedText>
+        </TouchableOpacity>
+        <View style={styles.statDivider} />
+        <TouchableOpacity style={styles.statItem}>
+          <ThemedText style={styles.statValue}>{userInfo?.followerCount || 0}</ThemedText>
+          <ThemedText style={styles.statLabel}>粉丝</ThemedText>
+        </TouchableOpacity>
+      </View>
+
+      {/* 个人简介 */}
+      {userInfo?.userProfile && (
+        <View style={[styles.sectionCard, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}>
+          <ThemedText style={styles.sectionTitle}>个人简介</ThemedText>
+          <ThemedText style={styles.bioText}>{userInfo.userProfile}</ThemedText>
+        </View>
+      )}
+
+      {/* 账号信息 */}
+      <View style={[styles.sectionCard, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}>
+        <ThemedText style={styles.sectionTitle}>账号信息</ThemedText>
+
+        <View style={styles.infoItem}>
+          <View style={styles.infoLeft}>
+            <IconSymbol size={18} color={theme.tint} name="tag.fill" style={styles.infoIcon} />
+            <ThemedText style={styles.infoLabel}>用户编号</ThemedText>
+          </View>
+          <ThemedText style={styles.infoValue}>{userInfo?.userNo || userInfo?.id || '-'}</ThemedText>
+        </View>
+
+        {userInfo?.email && (
+          <View style={styles.infoItem}>
+            <View style={styles.infoLeft}>
+              <IconSymbol size={18} color={theme.tint} name="paperplane.fill" style={styles.infoIcon} />
+              <ThemedText style={styles.infoLabel}>邮箱</ThemedText>
+            </View>
+            <ThemedText style={styles.infoValue}>{userInfo.email}</ThemedText>
+          </View>
+        )}
+
+        {userInfo?.createTime && (
+          <View style={styles.infoItem}>
+            <View style={styles.infoLeft}>
+              <IconSymbol size={18} color={theme.tint} name="gift.fill" style={styles.infoIcon} />
+              <ThemedText style={styles.infoLabel}>注册时间</ThemedText>
+            </View>
+            <ThemedText style={styles.infoValue}>
+              {new Date(userInfo.createTime).toLocaleDateString('zh-CN')}
             </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
+          </View>
+        )}
+
+        <View style={styles.infoItem}>
+          <View style={styles.infoLeft}>
+            <IconSymbol size={18} color={theme.tint} name="person.fill" style={styles.infoIcon} />
+            <ThemedText style={styles.infoLabel}>在线状态</ThemedText>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: userInfo?.userOnlineFlag === false ? '#99999920' : '#4CAF5020' }]}>
+            <View style={[styles.statusDot, { backgroundColor: userInfo?.userOnlineFlag === false ? '#999' : '#4CAF50' }]} />
+            <ThemedText style={[styles.statusText, { color: userInfo?.userOnlineFlag === false ? '#999' : '#4CAF50' }]}>
+              {userInfo?.userOnlineFlag === false ? '离线' : '在线'}
+            </ThemedText>
+          </View>
+        </View>
+      </View>
+
+      {/* 退出登录按钮 */}
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <IconSymbol name="arrow.right" size={18} color="#FF5252" />
+        <ThemedText style={styles.logoutButtonText}>退出登录</ThemedText>
+      </TouchableOpacity>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  scrollView: {
+    flex: 1,
   },
-  titleContainer: {
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  headerBg: {
+    height: 140,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+  },
+  unauthCard: {
+    marginHorizontal: 16,
+    marginTop: -50,
+    padding: 24,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  profileCard: {
+    marginHorizontal: 16,
+    marginTop: -50,
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  avatarWrapper: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 4,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+    overflow: 'hidden',
+  },
+  avatar: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nickname: {
+    fontSize: 22,
+    marginTop: 12,
+  },
+  username: {
+    fontSize: 14,
+    opacity: 0.5,
+    marginTop: 4,
+  },
+  vipBadge: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF8E1',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  vipText: {
+    fontSize: 11,
+    color: '#FF8F00',
+    fontWeight: '600',
+  },
+  statsCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginHorizontal: 16,
+    marginTop: 16,
+    paddingVertical: 20,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  statLabel: {
+    fontSize: 12,
+    opacity: 0.5,
+    marginTop: 4,
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: 'rgba(128,128,128,0.15)',
+  },
+  sectionCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    padding: 20,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 16,
+  },
+  bioText: {
+    fontSize: 14,
+    lineHeight: 22,
+    opacity: 0.7,
+  },
+  infoItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128,128,128,0.08)',
+  },
+  infoLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  infoIcon: {
+    opacity: 0.8,
+  },
+  infoLabel: {
+    fontSize: 14,
+    opacity: 0.6,
+  },
+  infoValue: {
+    fontSize: 14,
+    opacity: 0.8,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
+    marginHorizontal: 16,
+    marginTop: 20,
+    paddingVertical: 14,
+    backgroundColor: '#FF525210',
+    borderRadius: 12,
+  },
+  logoutButtonText: {
+    color: '#FF5252',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  hintText: {
+    textAlign: 'center',
+    opacity: 0.5,
+    marginTop: 16,
+    marginBottom: 8,
+    fontSize: 14,
+  },
+  loginButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 48,
+    borderRadius: 12,
+  },
+  loginButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

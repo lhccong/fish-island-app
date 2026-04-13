@@ -6,29 +6,29 @@
 import { Platform } from 'react-native';
 import { MD3DarkTheme, MD3LightTheme } from 'react-native-paper';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const tintColorLight = '#ff9900';
+const tintColorDark = '#ff9900';
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
+    text: '#444',
+    background: '#f4f4f4',
     tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
+    icon: '#777',
+    tabIconDefault: '#777',
     tabIconSelected: tintColorLight,
-    card: '#f8f9fa',
-    border: '#e1e4e8',
+    card: '#fff',
+    border: '#eee',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
+    text: '#e0e0e0',
+    background: '#1e1e1e',
     tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
+    icon: '#b2bec3',
+    tabIconDefault: '#b2bec3',
     tabIconSelected: tintColorDark,
-    card: '#1e2022',
-    border: '#2a2d2f',
+    card: '#2a2a2d',
+    border: '#404040',
   },
 };
 
@@ -37,12 +37,12 @@ export const paperLightTheme = {
   ...MD3LightTheme,
   colors: {
     ...MD3LightTheme.colors,
-    primary: '#007AFF',
-    primaryContainer: '#E3F2FD',
-    secondary: '#00C853',
-    error: '#FF3B30',
-    background: '#F5F5F5',
-    surface: '#FFFFFF',
+    primary: '#ff9900',
+    primaryContainer: '#FFF3E0',
+    secondary: '#2ed573',
+    error: '#ff4757',
+    background: '#f4f4f4',
+    surface: '#fff',
   },
   roundness: 12,
 };
@@ -51,11 +51,11 @@ export const paperDarkTheme = {
   ...MD3DarkTheme,
   colors: {
     ...MD3DarkTheme.colors,
-    primary: '#0A84FF',
-    secondary: '#30D158',
-    error: '#FF453A',
-    background: '#000000',
-    surface: '#1C1C1E',
+    primary: '#ff9900',
+    secondary: '#00b894',
+    error: '#ff6b6b',
+    background: '#1e1e1e',
+    surface: '#2a2a2d',
   },
   roundness: 12,
 };
