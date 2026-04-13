@@ -30,6 +30,11 @@ const MAPPING = {
   'photo': 'photo-library',
   'xmark': 'close',
   'arrow.right': 'logout',
+  'face.smiling': 'emoji-emotions',
+  'heart.slash': 'heart-broken',
+  'plus': 'add',
+  'magnifyingglass': 'search',
+  'ellipsis': 'more-horiz',
 } as IconMapping;
 
 /**

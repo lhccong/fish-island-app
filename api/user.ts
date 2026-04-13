@@ -232,4 +232,101 @@ export const userApi = {
   async getUsernameSuggestions(name: string): Promise<ApiResponse> {
     return request.post('/users/names', { name });
   },
+
+  /**
+   * 上传图片
+   * @param uri - 图片本地URI
+   * @param fileName - 文件名
+   */
+  async uploadImage(uri: string, fileName: string): Promise<ApiResponse<string>> {
+    const formData = new FormData();
+
+    // 根据文件扩展名推断 MIME 类型
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    const mimeMap: Record<string, string> = {
+      png: 'image/png',
+      gif: 'image/gif',
+      webp: 'image/webp',
+    };
+    const fileType = mimeMap[ext ?? ''] ?? 'image/jpeg';
+
+    // React Native 特定的文件对象格式
+    formData.append('file', { uri, type: fileType, name: fileName } as any);
+
+    // 获取认证信息
+    const tokenName = await request.getTokenName();
+    const tokenValue = await request.getTokenValue();
+    const apiKey = await request.getApiKey();
+
+    // 构建请求头（不手动设置 Content-Type，让 fetch 自动附加 boundary）
+    const headers: Record<string, string> = {};
+
+    // 构建 URL
+    let url = 'https://api.yucoder.cn/api/file/minio/upload?biz=user_file';
+
+    if (tokenName && tokenValue) {
+      // 优先使用 token 认证
+      headers[tokenName] = tokenValue;
+    } else if (apiKey) {
+      // 回退到 apiKey
+      url += `&apiKey=${apiKey}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData as any,
+    });
+
+    if (!response.ok) {
+      throw new Error(`上传失败: ${response.status}`);
+    }
+
+    return await response.json();
+  },
+
+  /**
+   * 新增收藏表情包
+   * @param emoticonSrc - 表情包图片URL
+   */
+  async addEmoticonFavour(emoticonSrc: string): Promise<ApiResponse> {
+    return request.postText('/api/emoticon_favour/add', emoticonSrc);
+  },
+
+  /**
+   * 删除收藏表情包
+   * @param id - 表情包收藏ID
+   */
+  async deleteEmoticonFavour(id: string | number): Promise<ApiResponse> {
+    return request.post('/api/emoticon_favour/delete', { id: String(id) });
+  },
+
+  /**
+   * 分页查询收藏表情包列表
+   */
+  async listEmoticonFavourByPage(params: {
+    current?: number;
+    pageSize?: number;
+    sortField?: string;
+    sortOrder?: 'asc' | 'desc';
+  } = {}): Promise<ApiResponse<{
+    records: Array<{
+      id: number;
+      userId: number;
+      emoticonSrc: string;
+      createTime: string;
+      updateTime: string;
+    }>;
+    total: number;
+    current: number;
+    size: number;
+    pages: number;
+  }>> {
+    return request.post('/api/emoticon_favour/list/page', {
+      current: Number(params.current) || 1,
+      pageSize: Number(params.pageSize) || 20,
+      sortField: params.sortField,
+      sortOrder: params.sortOrder,
+    });
+  },
 };
