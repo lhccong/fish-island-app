@@ -13,20 +13,21 @@ import wsManager, { BACKEND_HOST_WS } from '@/utils/websocket';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -254,6 +255,7 @@ const transformOnlineUsers = (users: any[]): OnlineUser[] => {
 export default function ChatroomScreen() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
+  const isDark = colorScheme === 'dark';
   const router = useRouter();
   const { userInfo: currentUser } = useUser();
   const tabBarHeight = useBottomTabBarHeight();
@@ -911,10 +913,13 @@ export default function ChatroomScreen() {
           source={{ uri: item.userAvatarURL48 || item.userAvatarURL || 'https://api.yucoder.cn/images/default-avatar.png' }}
           style={styles.avatar}
         />
-        <View style={[styles.messageBubble, isSelf && styles.messageBubbleSelf]}>
+        <View style={[
+          styles.messageBubble,
+          isSelf ? styles.messageBubbleSelf : { backgroundColor: isDark ? '#3a3a3d' : '#f0f0f0' }
+        ]}>
           {/* 非自己的消息显示昵称 */}
           {!isSelf && item.userNickname && item.userNickname.trim() && (
-            <Text style={[styles.senderName, { color: theme.text }]}>
+            <Text style={[styles.senderName, { color: isDark ? '#b0b0b0' : '#666' }]}>
               {item.userNickname}
             </Text>
           )}
@@ -929,7 +934,7 @@ export default function ChatroomScreen() {
               activeOpacity={0.8}
             >
               <IconSymbol name="gift.fill" size={20} color="#FF6B6B" />
-              <Text style={styles.redPacketText}>
+              <Text style={[styles.redPacketText, { color: isDark ? '#fff' : '#FF6B6B' }]}>
                 {(parseRedPacket(item.content)?.msg) || '红包'}
               </Text>
             </TouchableOpacity>
@@ -940,11 +945,11 @@ export default function ChatroomScreen() {
               isSelf={isSelf}
             />
           ) : (
-            <Text style={[styles.messageText, { color: theme.text }]}>
+            <Text style={[styles.messageText, { color: isSelf ? '#fff' : theme.text }]}>
               {processMessageContent(item.content)}
             </Text>
           )}
-          <Text style={[styles.messageTime, { color: isSelf ? 'rgba(255,255,255,0.7)' : theme.icon }]}>
+          <Text style={[styles.messageTime, { color: isSelf ? 'rgba(255,255,255,0.8)' : theme.icon }]}>
             {item.time ? new Date(item.time).toLocaleTimeString() : ' '}
           </Text>
         </View>
@@ -954,8 +959,9 @@ export default function ChatroomScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       {/* 头部 */}
-      <View style={[styles.header, { backgroundColor: theme.card }]}>
+      <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <View style={styles.headerLeft}>
           <Text style={[styles.headerTitle, { color: theme.text }]}>
             摸鱼岛
@@ -975,7 +981,7 @@ export default function ChatroomScreen() {
 
       {/* 当前话题 */}
       {currentTopic && (
-        <View style={[styles.topicBar, { backgroundColor: theme.card }]}>
+        <View style={[styles.topicBar, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
           <IconSymbol name="tag.fill" size={14} color={theme.tint} />
           <Text style={[styles.topicText, { color: theme.text }]} numberOfLines={1}>
             话题: {currentTopic}
@@ -1375,7 +1381,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 4,
   },
   messageBubbleSelf: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#ff9900',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 4,
   },
