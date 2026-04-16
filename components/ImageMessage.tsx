@@ -117,8 +117,8 @@ const styles = StyleSheet.create({
   singleImageContainer: {
     borderRadius: 8,
     overflow: 'hidden',
-    maxWidth: 200,
-    maxHeight: 200,
+    width: 200,
+    height: 200,
   },
   singleImage: {
     width: 200,

@@ -11,6 +11,7 @@ import { useUser } from '@/contexts/UserContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import wsManager, { BACKEND_HOST_WS } from '@/utils/websocket';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -94,7 +95,7 @@ const transformRoomMessageVoToLegacy = (record: any): ChatMessage | null => {
     parseTimestamp(message.sentTime);
 
   const legacyMessage: any = {
-    oId: message.id || record.id || `${record.roomId || 'room'}-${Date.now()}`,
+    oId: message.id || record.id || `${record.roomId || 'room'}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     id: record.id,
     roomId: record.roomId ?? message.roomId ?? null,
     content: message.content ?? '',
@@ -460,23 +461,28 @@ export default function ChatroomScreen() {
 
         if (page === 1) {
           const reversedMessages = transformedMessages.reverse();
-          setMessages(reversedMessages);
+          // 去重：同一批次内可能有重复 id
+          const seen = new Set();
+          const uniqueMessages = reversedMessages.filter((m: ChatMessage) => {
+            const key = m.oId || m.id;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          setMessages(uniqueMessages);
           hasInitialScrolledRef.current = false;
-        } else {
-          // 加载更多历史消息，插入到前面
-          const newMsgs = transformedMessages.reverse();
-          const insertCount = newMsgs.length;
-          // 先隐藏列表避免闪烁，插入后跳回原位再显示
-          setListOpacity(0);
-          setMessages((prev) => [...newMsgs, ...prev]);
+          // 首次加载后滚动到底部
           setTimeout(() => {
-            flatListRef.current?.scrollToIndex({
-              index: insertCount,
-              animated: false,
-              viewPosition: 0,
-            });
-            setListOpacity(1);
-          }, 50);
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }, 100);
+        } else {
+          // 加载更多历史消息，插入到前面（去重）
+          const newMsgs = transformedMessages.reverse();
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m: ChatMessage) => m.oId || m.id));
+            const uniqueNewMsgs = newMsgs.filter((m: ChatMessage) => !existingIds.has(m.oId || m.id));
+            return [...uniqueNewMsgs, ...prev];
+          });
         }
         setHasMoreMessages(records.length === 20);
         setCurrentPage(page);
@@ -585,6 +591,22 @@ export default function ChatroomScreen() {
     setImagePreviewVisible(true);
   };
 
+  // 压缩图片
+  const compressImage = async (uri: string): Promise<string> => {
+    try {
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1280 } }], // 限制最大宽度为1280，等比例缩放
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG } // 压缩质量70%
+      );
+      return manipulatedImage.uri;
+    } catch (error) {
+      console.error('图片压缩失败:', error);
+      // 压缩失败返回原图
+      return uri;
+    }
+  };
+
   const pickImage = async () => {
     try {
       // Request permission
@@ -598,7 +620,7 @@ export default function ChatroomScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
-        quality: 0.8,
+        quality: 1, // 原图质量，后续用 ImageManipulator 压缩
         allowsMultipleSelection: false,
       });
 
@@ -609,10 +631,13 @@ export default function ChatroomScreen() {
           // Show loading state
           setIsUploading(true);
 
+          // 压缩图片
+          const compressedUri = await compressImage(asset.uri);
+
           // Upload image to server
           const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
           const fileName = `image_${Date.now()}.${ext}`;
-          const uploadResponse = await chatApi.uploadImage(asset.uri, fileName);
+          const uploadResponse = await chatApi.uploadImage(compressedUri, fileName);
 
           if (uploadResponse && uploadResponse.code === 0) {
             const imageUrl = uploadResponse.data;
@@ -915,7 +940,7 @@ export default function ChatroomScreen() {
         />
         <View style={[
           styles.messageBubble,
-          isSelf ? styles.messageBubbleSelf : { backgroundColor: isDark ? '#3a3a3d' : '#f0f0f0' }
+          isSelf ? [styles.messageBubbleSelf, { backgroundColor: isDark ? '#3a3a3d' : '#f0f0f0' }] : { backgroundColor: isDark ? '#3a3a3d' : '#f0f0f0' }
         ]}>
           {/* 非自己的消息显示昵称 */}
           {!isSelf && item.userNickname && item.userNickname.trim() && (
@@ -945,11 +970,11 @@ export default function ChatroomScreen() {
               isSelf={isSelf}
             />
           ) : (
-            <Text style={[styles.messageText, { color: isSelf ? '#fff' : theme.text }]}>
+            <Text style={[styles.messageText, { color: theme.text }]}>
               {processMessageContent(item.content)}
             </Text>
           )}
-          <Text style={[styles.messageTime, { color: isSelf ? 'rgba(255,255,255,0.8)' : theme.icon }]}>
+          <Text style={[styles.messageTime, { color: theme.icon }]}>
             {item.time ? new Date(item.time).toLocaleTimeString() : ' '}
           </Text>
         </View>
@@ -1012,7 +1037,7 @@ export default function ChatroomScreen() {
             </View>
             <FlatList
               data={onlineUsers}
-              keyExtractor={(u) => u.userName}
+              keyExtractor={(u, index) => `${u.userName}-${index}`}
               style={styles.onlineUsersList}
               renderItem={({ item: user }) => (
                 <TouchableOpacity
@@ -1066,7 +1091,7 @@ export default function ChatroomScreen() {
               }, 300);
             }
           }}
-          maintainVisibleContentPosition={null}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: undefined }}
           onScrollToIndexFailed={(info) => {
             flatListRef.current?.scrollToOffset({
               offset: info.averageItemLength * info.index,
@@ -1381,7 +1406,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 4,
   },
   messageBubbleSelf: {
-    backgroundColor: '#ff9900',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 4,
   },

@@ -35,10 +35,10 @@ export default function ProfileScreen() {
   if (!isLoggedIn) {
     return (
       <ScrollView
-        style={[styles.scrollView, { backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5' }]}
+        style={[styles.scrollView, { backgroundColor: theme.background }]}
         contentContainerStyle={styles.scrollContent}>
         <View style={[styles.headerBg, { backgroundColor: theme.tint }]} />
-        <View style={styles.unauthCard}>
+        <View style={[styles.unauthCard, { backgroundColor: theme.card }]}>
           <View style={[styles.avatarPlaceholder, { backgroundColor: isDark ? '#333' : '#e0e0e0' }]}>
             <IconSymbol size={60} color="#808080" name="person.fill" />
           </View>
@@ -58,14 +58,14 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView
-      style={[styles.scrollView, { backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5' }]}
+      style={[styles.scrollView, { backgroundColor: theme.background }]}
       contentContainerStyle={styles.scrollContent}>
       {/* 顶部渐变背景 */}
       <View style={[styles.headerBg, { backgroundColor: theme.tint }]} />
 
       {/* 头像卡片 */}
-      <View style={styles.profileCard}>
-        <View style={styles.avatarWrapper}>
+      <View style={[styles.profileCard, { backgroundColor: theme.card }]}>
+        <View style={[styles.avatarWrapper, { borderColor: theme.card }]}>
           {userInfo?.userAvatar ? (
             <Image
               source={{ uri: userInfo.userAvatar }}
@@ -87,15 +87,15 @@ export default function ProfileScreen() {
 
         {/* VIP 标识 */}
         {userInfo?.vip && (
-          <View style={styles.vipBadge}>
+          <View style={[styles.vipBadge, { backgroundColor: isDark ? '#3d3d20' : '#FFF8E1' }]}>
             <IconSymbol size={12} color="#FFD700" name="gift.fill" />
-            <ThemedText style={styles.vipText}>VIP</ThemedText>
+            <ThemedText style={[styles.vipText, { color: isDark ? '#FFD700' : '#FF8F00' }]}>VIP</ThemedText>
           </View>
         )}
       </View>
 
       {/* 统计卡片 */}
-      <View style={[styles.statsCard, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}>
+      <View style={[styles.statsCard, { backgroundColor: theme.card }]}>
         <TouchableOpacity style={styles.statItem}>
           <ThemedText style={styles.statValue}>{userInfo?.points || userInfo?.userPoint || 0}</ThemedText>
           <ThemedText style={styles.statLabel}>积分</ThemedText>
@@ -119,14 +119,14 @@ export default function ProfileScreen() {
 
       {/* 个人简介 */}
       {userInfo?.userProfile && (
-        <View style={[styles.sectionCard, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}>
+        <View style={[styles.sectionCard, { backgroundColor: theme.card }]}>
           <ThemedText style={styles.sectionTitle}>个人简介</ThemedText>
           <ThemedText style={styles.bioText}>{userInfo.userProfile}</ThemedText>
         </View>
       )}
 
       {/* 账号信息 */}
-      <View style={[styles.sectionCard, { backgroundColor: isDark ? '#2a2a2a' : '#fff' }]}>
+      <View style={[styles.sectionCard, { backgroundColor: theme.card }]}>
         <ThemedText style={styles.sectionTitle}>账号信息</ThemedText>
 
         <View style={styles.infoItem}>
@@ -174,9 +174,9 @@ export default function ProfileScreen() {
       </View>
 
       {/* 退出登录按钮 */}
-      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+      <TouchableOpacity style={[styles.logoutButton, { backgroundColor: isDark ? '#3d2020' : '#FF525210' }]} onPress={handleLogout}>
         <IconSymbol name="arrow.right" size={18} color="#FF5252" />
-        <ThemedText style={styles.logoutButtonText}>退出登录</ThemedText>
+        <ThemedText style={[styles.logoutButtonText, { color: '#FF5252' }]}>退出登录</ThemedText>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -199,7 +199,6 @@ const styles = StyleSheet.create({
     marginTop: -50,
     padding: 24,
     borderRadius: 16,
-    backgroundColor: '#fff',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -213,7 +212,6 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     paddingHorizontal: 24,
     borderRadius: 16,
-    backgroundColor: '#fff',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -226,7 +224,6 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 50,
     borderWidth: 4,
-    borderColor: '#fff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -257,7 +254,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#FFF8E1',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -265,7 +261,6 @@ const styles = StyleSheet.create({
   },
   vipText: {
     fontSize: 11,
-    color: '#FF8F00',
     fontWeight: '600',
   },
   statsCard: {
@@ -296,7 +291,7 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    backgroundColor: 'rgba(128,128,128,0.15)',
+    backgroundColor: 'rgba(128,128,128,0.2)',
   },
   sectionCard: {
     marginHorizontal: 16,
@@ -325,7 +320,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(128,128,128,0.08)',
+    borderBottomColor: 'rgba(128,128,128,0.15)',
   },
   infoLeft: {
     flexDirection: 'row',
@@ -368,11 +363,9 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 20,
     paddingVertical: 14,
-    backgroundColor: '#FF525210',
     borderRadius: 12,
   },
   logoutButtonText: {
-    color: '#FF5252',
     fontSize: 15,
     fontWeight: '600',
   },
