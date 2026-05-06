@@ -10,7 +10,7 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
    build : npx eas update
-
+   eas build -p android --profile preview
 
 2. Start the app
 
