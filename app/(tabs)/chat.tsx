@@ -11,24 +11,25 @@ import { useUser } from '@/contexts/UserContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import wsManager, { BACKEND_HOST_WS } from '@/utils/websocket';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useFocusEffect } from '@react-navigation/native';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -310,18 +311,16 @@ export default function ChatroomScreen() {
   // 功能菜单状态
   const [showMenu, setShowMenu] = useState(false);
 
-  // 连接 WebSocket
-  useEffect(() => {
-    connectWebSocket();
-    return () => {
-      wsManager.close(CONNECTION_ID);
-    };
-  }, []);
-
-  // 加载历史消息
-  useEffect(() => {
-    loadMessages();
-  }, []);
+  // 每次进入 tab 时重新连接 WebSocket 并加载最新消息
+  useFocusEffect(
+    useCallback(() => {
+      connectWebSocket();
+      loadMessages();
+      return () => {
+        wsManager.close(CONNECTION_ID);
+      };
+    }, [])
+  );
 
   // 获取在线用户列表（参考 utools：挂载时拉一次 + 每 30s 轮询）
   useEffect(() => {
