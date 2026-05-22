@@ -1,15 +1,23 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
+import { useEventRemind } from '@/contexts/EventRemindContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+const TAB_BAR_BASE_HEIGHT = Platform.select({ ios: 49, default: 56 }) ?? 56;
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
-  const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
+  const { unreadCount } = useEventRemind();
+  const tabBarBottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 8 : 0);
+  const messageBadge = unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : undefined;
 
   return (
     <Tabs
@@ -22,6 +30,8 @@ export default function TabLayout() {
           backgroundColor: theme.card,
           borderTopColor: theme.border,
           borderTopWidth: 1,
+          paddingBottom: tabBarBottomInset,
+          height: TAB_BAR_BASE_HEIGHT + tabBarBottomInset,
         },
       }}>
       <Tabs.Screen
@@ -49,6 +59,7 @@ export default function TabLayout() {
         name="explore"
         options={{
           title: '我的',
+          tabBarBadge: messageBadge,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.fill" color={color} />,
         }}
       />

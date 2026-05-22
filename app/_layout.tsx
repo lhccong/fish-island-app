@@ -4,8 +4,10 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from 'react-native-paper';
 import 'react-native-reanimated';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 
+import { EventRemindProvider } from '@/contexts/EventRemindContext';
 import { UserProvider, useUser } from '@/contexts/UserContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -51,6 +53,8 @@ function RootLayoutNav() {
               title: '登录',
             }} 
           />
+          <Stack.Screen name="pet" options={{ headerShown: false }} />
+          <Stack.Screen name="points" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
       </AuthGuard>
@@ -63,11 +67,15 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
   
   return (
-    <PaperProvider theme={colorScheme === 'dark' ? MD3DarkTheme : MD3LightTheme}>
-      <UserProvider>
-        <RootLayoutNav />
-        <Toast />
-      </UserProvider>
-    </PaperProvider>
+    <SafeAreaProvider>
+      <PaperProvider theme={colorScheme === 'dark' ? MD3DarkTheme : MD3LightTheme}>
+        <UserProvider>
+          <EventRemindProvider>
+            <RootLayoutNav />
+            <Toast />
+          </EventRemindProvider>
+        </UserProvider>
+      </PaperProvider>
+    </SafeAreaProvider>
   );
 }

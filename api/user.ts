@@ -131,6 +131,14 @@ export const userApi = {
     });
   },
 
+  /** 修改宠物名称（消耗 100 积分） */
+  async updatePetName(name: string, petId?: number | string): Promise<ApiResponse> {
+    return request.post('/api/pet/update/name', {
+      name,
+      ...(petId != null ? { petId } : {}),
+    });
+  },
+
   // 获取用户资料
   async getUserProfile(identifier: string | number): Promise<ApiResponse> {
     const shouldUseIdLookup =
