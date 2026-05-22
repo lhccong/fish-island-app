@@ -3,36 +3,18 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useUser } from '@/contexts/UserContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { normalizeRedPacketType } from '@/utils/redPacket';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-
-interface RedPacketDetail {
-  id: string;
-  msg: string;
-  money: number;
-  count: number;
-  got: number;
-  type: string;
-  who: Array<any>;
-  info?: {
-    userName: string;
-    userAvatarURL48: string;
-    gesture?: number;
-    msg: string;
-    got: number;
-    count: number;
-  };
-}
 
 interface RedPacketDetailModalProps {
   visible: boolean;
@@ -41,7 +23,6 @@ interface RedPacketDetailModalProps {
   senderName?: string;
   senderAvatar?: string;
   msg?: string;
-  onGrabSuccess?: (data: any) => void;
 }
 
 export default function RedPacketDetailModal({
@@ -51,16 +32,14 @@ export default function RedPacketDetailModal({
   senderName,
   senderAvatar,
   msg,
-  onGrabSuccess,
 }: RedPacketDetailModalProps) {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
   const { userInfo } = useUser();
 
-  const [detail, setDetail] = useState<RedPacketDetail | null>(null);
+  const [detail, setDetail] = useState<any>(null);
+  const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [grabbing, setGrabbing] = useState(false);
-  const [hasGrabbed, setHasGrabbed] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     if (!redPacketId) return;
@@ -72,63 +51,27 @@ export default function RedPacketDetailModal({
         chatApi.getRedPacketRecords(redPacketId),
       ]);
 
-      if (detailRes.code === 0 && recordsRes.code === 0) {
-        const redPacketData = {
-          ...detailRes.data,
-          who: recordsRes.data || [],
-          info: {
-            userName: senderName || detailRes.data?.senderName || '',
-            userAvatarURL48: senderAvatar || detailRes.data?.senderAvatar || '',
-            msg: msg || detailRes.data?.msg || '',
-            got: detailRes.data?.got || 0,
-            count: detailRes.data?.count || 0,
-            gesture: detailRes.data?.gesture,
-          },
-        };
-        setDetail(redPacketData);
-
-        // 检查当前用户是否已经抢过
-        const currentUserGrabbed = recordsRes.data?.some(
-          (record: any) => record.userId === userInfo?.id
-        );
-        setHasGrabbed(currentUserGrabbed);
+      if (detailRes.code === 0) {
+        setDetail(detailRes.data);
+      }
+      if (recordsRes.code === 0) {
+        setRecords(recordsRes.data || []);
       }
     } catch (error) {
       console.error('获取红包详情失败:', error);
     } finally {
       setLoading(false);
     }
-  }, [redPacketId, senderName, senderAvatar, msg, userInfo?.id]);
+  }, [redPacketId]);
 
   useEffect(() => {
     if (visible && redPacketId) {
       fetchDetail();
+    } else if (!visible) {
+      setDetail(null);
+      setRecords([]);
     }
   }, [visible, redPacketId, fetchDetail]);
-
-  const handleGrab = async () => {
-    if (!redPacketId || grabbing || hasGrabbed) return;
-
-    setGrabbing(true);
-    try {
-      const response = await chatApi.grabRedPacket(redPacketId);
-
-      const res = response as any;
-      if (res.code === 0) {
-        setHasGrabbed(true);
-        onGrabSuccess?.(response.data);
-        // 刷新详情
-        fetchDetail();
-      } else {
-        Alert.alert('提示', res.msg || '抢红包失败');
-      }
-    } catch (error) {
-      console.error('抢红包失败:', error);
-      Alert.alert('提示', '抢红包失败，请重试');
-    } finally {
-      setGrabbing(false);
-    }
-  };
 
   const formatTime = (time: string) => {
     if (!time) return '';
@@ -140,23 +83,24 @@ export default function RedPacketDetailModal({
     });
   };
 
-  // 获取用户抢到的金额（支持多种字段名，API返回的是amount）
   const getUserMoney = (receiver: any): number => {
     if (!receiver) return 0;
     return receiver.amount ?? receiver.userMoney ?? receiver.money ?? 0;
   };
 
-  const isLuckyKing = (receiver: any) => {
-    if (!detail?.who?.length) return false;
-    // 平分红包和专属红包不显示手气王 (1=拼手气, 2=平分)
-    if (detail?.type === 'average' || detail?.type === 'specify' || String(detail?.type) === '2') return false;
+  const packetType = normalizeRedPacketType(detail?.type);
 
-    const whoList = detail.who || [];
-    const maxMoney = Math.max(...whoList.map((w) => getUserMoney(w)));
+  const isLuckyKing = (receiver: any) => {
+    if (!records.length) return false;
+    if (packetType === 'average' || packetType === 'specify' || packetType === 'rockPaperScissors') {
+      return false;
+    }
+
+    const maxMoney = Math.max(...records.map((w) => getUserMoney(w)));
     if (maxMoney <= 0) return false;
 
-    const firstMaxIndex = whoList.findIndex((w) => getUserMoney(w) === maxMoney);
-    const currentIndex = whoList.indexOf(receiver);
+    const firstMaxIndex = records.findIndex((w) => getUserMoney(w) === maxMoney);
+    const currentIndex = records.indexOf(receiver);
 
     return getUserMoney(receiver) === maxMoney && currentIndex === firstMaxIndex;
   };
@@ -170,21 +114,17 @@ export default function RedPacketDetailModal({
     return gesture !== undefined ? map[gesture] : '';
   };
 
-  const displaySenderName = detail?.info?.userName || senderName || '未知用户';
+  const displaySenderName = senderName || detail?.senderName || '未知用户';
   const displayAvatar =
-    detail?.info?.userAvatarURL48 ||
     senderAvatar ||
+    detail?.senderAvatar ||
     'https://api.yucoder.cn/images/default-avatar.png';
-  const displayMsg = detail?.info?.msg || msg || '红包';
-  // 已领取数量从领取记录列表中获取
-  const displayGot = detail?.who?.length ?? detail?.got ?? detail?.info?.got ?? 0;
-  const displayCount = detail?.count ?? detail?.info?.count ?? 0;
+  const displayMsg = msg || detail?.name || detail?.msg || '红包';
+  const displayGot = records.length || detail?.got || 0;
+  const displayCount = detail?.count || 0;
+  const displayAmount = detail?.totalAmount ?? detail?.money ?? 0;
 
-  // 判断是否还可以抢
-  const canGrab =
-    !hasGrabbed &&
-    displayGot < displayCount &&
-    (detail?.who?.length || 0) < displayCount;
+  const sortedRecords = [...records].sort((a, b) => getUserMoney(b) - getUserMoney(a));
 
   return (
     <Modal
@@ -195,57 +135,34 @@ export default function RedPacketDetailModal({
     >
       <View style={styles.overlay}>
         <View style={[styles.container, { backgroundColor: theme.card }]}>
-          {/* 头部 */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
               <IconSymbol name="xmark" size={20} color="#fff" />
             </TouchableOpacity>
 
-            {/* 发送者信息 */}
             <View style={styles.senderInfo}>
-              <Image
-                source={{ uri: displayAvatar }}
-                style={styles.senderAvatar}
-              />
+              <Image source={{ uri: displayAvatar }} style={styles.senderAvatar} />
               <Text style={styles.senderName}>{displaySenderName}</Text>
-              {detail?.type === 'rockPaperScissors' && (
+              {packetType === 'rockPaperScissors' && (
                 <View style={styles.gestureTag}>
-                  <Text style={styles.gestureText}>
-                    {getGestureName(detail.info?.gesture)}
-                  </Text>
+                  <Text style={styles.gestureText}>{getGestureName(detail?.gesture)}</Text>
                 </View>
               )}
             </View>
 
             <Text style={styles.messageText}>{displayMsg}</Text>
 
-            {/* 红包金额或抢红包按钮 */}
-            {canGrab ? (
-              <TouchableOpacity
-                style={[styles.grabButton, grabbing && styles.grabButtonDisabled]}
-                onPress={handleGrab}
-                disabled={grabbing}
-              >
-                <Text style={styles.grabButtonText}>
-                  {grabbing ? '抢红包中...' : '开'}
-                </Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.amountSection}>
-                {hasGrabbed && detail?.who && (
-                  <Text style={styles.amountText}>
-                    {getUserMoney(detail.who.find((w) => String(w.userId) === String(userInfo?.id)))}
-                    <Text style={styles.amountUnit}> 积分</Text>
-                  </Text>
-                )}
-                <Text style={styles.redPacketInfo}>
-                  {displayGot}/{displayCount}个红包
-                </Text>
-              </View>
-            )}
+            <View style={styles.amountSection}>
+              <Text style={styles.amountText}>
+                {displayAmount}
+                <Text style={styles.amountUnit}> 积分</Text>
+              </Text>
+              <Text style={styles.redPacketInfo}>
+                {displayGot}/{displayCount}个红包
+              </Text>
+            </View>
           </View>
 
-          {/* 领取列表 */}
           <View style={styles.body}>
             <Text style={[styles.listTitle, { color: theme.text }]}>
               已领取 {displayGot}/{displayCount}
@@ -254,53 +171,52 @@ export default function RedPacketDetailModal({
             {loading ? (
               <ActivityIndicator style={styles.loader} color={theme.tint} />
             ) : (
-              <ScrollView
-                style={styles.receiverList}
-                showsVerticalScrollIndicator={false}
-              >
-                {[...(detail?.who || [])]
-                  .sort((a, b) => getUserMoney(b) - getUserMoney(a))
-                  .map((receiver, index) => {
-                    // 获取头像URL（API返回的是userAvatar）
-                    const avatarUrl = receiver.userAvatar || receiver.avatar || '';
-                    return (
-                  <View key={`${receiver.id || receiver.userId}-${index}`} style={styles.receiverItem}>
-                    <Image
-                      source={avatarUrl ? { uri: avatarUrl } : { uri: 'https://api.yucoder.cn/images/default-avatar.png' }}
-                      style={styles.receiverAvatar}
-                      resizeMode="cover"
-                    />
-                    <View style={styles.receiverInfo}>
-                      <View style={styles.receiverNameRow}>
-                        <Text
-                          style={[styles.receiverName, { color: theme.text }]}
-                          numberOfLines={1}
-                        >
-                          {receiver.userName}
+              <ScrollView style={styles.receiverList} showsVerticalScrollIndicator={false}>
+                {sortedRecords.map((receiver, index) => {
+                  const avatarUrl = receiver.userAvatar || receiver.avatar || '';
+                  return (
+                    <View
+                      key={`${receiver.id || receiver.userId}-${index}`}
+                      style={styles.receiverItem}
+                    >
+                      <Image
+                        source={
+                          avatarUrl
+                            ? { uri: avatarUrl }
+                            : { uri: 'https://api.yucoder.cn/images/default-avatar.png' }
+                        }
+                        style={styles.receiverAvatar}
+                        resizeMode="cover"
+                      />
+                      <View style={styles.receiverInfo}>
+                        <View style={styles.receiverNameRow}>
+                          <Text
+                            style={[styles.receiverName, { color: theme.text }]}
+                            numberOfLines={1}
+                          >
+                            {receiver.userName}
+                          </Text>
+                          {String(receiver.userId) === String(userInfo?.id) && (
+                            <View style={styles.currentUserTag}>
+                              <Text style={styles.tagText}>我</Text>
+                            </View>
+                          )}
+                          {isLuckyKing(receiver) && (
+                            <View style={styles.luckyKingTag}>
+                              <Text style={styles.tagText}>手气王</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={[styles.receiverTime, { color: theme.icon }]}>
+                          {formatTime(receiver.grabTime || receiver.time)}
                         </Text>
-                        {String(receiver.userId) === String(userInfo?.id) && (
-                          <View style={styles.currentUserTag}>
-                            <Text style={styles.tagText}>我</Text>
-                          </View>
-                        )}
-                        {isLuckyKing(receiver) && (
-                          <View style={styles.luckyKingTag}>
-                            <Text style={styles.tagText}>手气王</Text>
-                          </View>
-                        )}
                       </View>
-                      <Text style={[styles.receiverTime, { color: theme.icon }]}>
-                        {formatTime(receiver.grabTime || receiver.time)}
-                      </Text>
+                      <Text style={styles.receiverAmount}>{getUserMoney(receiver)} 积分</Text>
                     </View>
-                    <Text style={styles.receiverAmount}>
-                      {getUserMoney(receiver)} 积分
-                    </Text>
-                  </View>
                   );
                 })}
 
-                {(!detail?.who || detail.who.length === 0) && (
+                {sortedRecords.length === 0 && (
                   <Text style={[styles.emptyText, { color: theme.icon }]}>
                     还没有人领取红包
                   </Text>
@@ -309,12 +225,9 @@ export default function RedPacketDetailModal({
             )}
           </View>
 
-          {/* 底部 */}
           <View style={[styles.footer, { borderTopColor: theme.border }]}>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Text style={[styles.closeButtonText, { color: theme.text }]}>
-                关闭
-              </Text>
+              <Text style={[styles.closeButtonText, { color: theme.text }]}>关闭</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -338,7 +251,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   header: {
-    backgroundColor: '#FF6B6B',
+    backgroundColor: '#ff4d4f',
     padding: 24,
     alignItems: 'center',
     position: 'relative',
@@ -388,27 +301,6 @@ const styles = StyleSheet.create({
     color: '#fffbe6',
     fontSize: 14,
     marginBottom: 16,
-  },
-  grabButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#FFD700',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  grabButtonDisabled: {
-    opacity: 0.6,
-  },
-  grabButtonText: {
-    color: '#FF6B6B',
-    fontSize: 24,
-    fontWeight: 'bold',
   },
   amountSection: {
     alignItems: 'center',
@@ -473,7 +365,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   currentUserTag: {
-    backgroundColor: '#FF6B6B',
+    backgroundColor: '#ff4d4f',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 10,
@@ -493,7 +385,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   receiverAmount: {
-    color: '#FF6B6B',
+    color: '#ff4d4f',
     fontSize: 15,
     fontWeight: '500',
     marginLeft: 8,

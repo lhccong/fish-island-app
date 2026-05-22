@@ -2,14 +2,33 @@ import { chatApi, ChatMessage, OnlineUser } from '@/api/chat';
 import EmojiPicker from '@/components/EmojiPicker';
 import ImageMessage from '@/components/ImageMessage';
 import ImagePreviewModal from '@/components/ImagePreviewModal';
-import MessageContextMenu from "@/components/MessageContextMenu";
-import RedPacketDetailModal from "@/components/RedPacketDetailModal";
-import RedPacketDialog from "@/components/RedPacketDialog";
+import ContextMenu, { ContextMenuItem } from '@/components/ContextMenu';
+import { userRemarkApi } from '@/api/userRemark';
+import RedPacketDetailModal from '@/components/RedPacketDetailModal';
+import RedPacketDialog from '@/components/RedPacketDialog';
+import RedPacketMessageCard from '@/components/RedPacketMessageCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useUser } from '@/contexts/UserContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import {
+  buildMessageContextMenuItems,
+  buildUserContextMenuItems,
+  extractImageUrl,
+  stripHtml,
+} from '@/utils/chatContextMenu';
+import {
+  BlacklistUser,
+  loadBlacklist,
+  loadCachedRemarks,
+  saveBlacklist,
+  saveCachedRemarks,
+  UserRemarksMap,
+} from '@/utils/chatPreferences';
+import { isRedPacketContent, parseRedPacketContent } from '@/utils/redPacket';
+import { toast } from '@/utils/toast';
 import wsManager, { BACKEND_HOST_WS } from '@/utils/websocket';
+import * as Clipboard from 'expo-clipboard';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -20,17 +39,25 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Dimensions,
     FlatList,
     Image,
-    KeyboardAvoidingView,
+    Keyboard,
+    KeyboardEvent,
     Modal,
     Platform,
     StyleSheet,
     Text,
+    Pressable,
     TextInput,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     View
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const CONNECTION_ID = 'chatroom';
@@ -109,6 +136,7 @@ const transformRoomMessageVoToLegacy = (record: any): ChatMessage | null => {
   };
 
   if (senderInfo) {
+    legacyMessage.userId = senderInfo.userId || message.sender?.id || record.userId;
     legacyMessage.userName = senderInfo.userName || fallbackName;
     legacyMessage.userNickname = senderInfo.userNickname || fallbackName;
     legacyMessage.userAvatarURL = senderInfo.userAvatarURL || fallbackAvatar;
@@ -187,52 +215,11 @@ const parseImageUrls = (content?: string): string[] => {
   return urls;
 };
 
-// 判断消息是否包含红包
-const isRedPacket = (content?: string): boolean => {
-  if (!content) return false;
-  // 检查是否是 [redpacket]...[/redpacket] 格式
-  if (/\[redpacket\]\s*[\s\S]*?\s*\[\/redpacket\]/i.test(content)) {
-    return true;
-  }
-  try {
-    const parsed = JSON.parse(content);
-    return parsed.msgType === 'redPacket';
-  } catch {
-    return false;
-  }
-};
-
-// 解析红包信息
-const parseRedPacket = (content?: string): any => {
-  if (!content || typeof content !== 'string') return null;
-  // 处理 [redpacket]...[/redpacket] 格式
-  const redPacketMatch = content.match(/\[redpacket\]\s*([\s\S]*?)\s*\[\/redpacket\]/i);
-  if (redPacketMatch) {
-    const redPacketContent = String(redPacketMatch[1] || '').trim();
-    try {
-      const parsed = JSON.parse(redPacketContent);
-      if (parsed.msgType === 'redPacket') {
-        return parsed;
-      }
-    } catch {
-      // 不是 JSON，是红包ID，返回默认结构
-      return {
-        msgType: 'redPacket',
-        redPacketId: redPacketContent,
-        msg: '红包',
-        money: 0,
-        count: 0,
-        got: 0,
-        type: 'random',
-      };
-    }
-  }
-  // 处理 JSON 格式
-  try {
-    return JSON.parse(content);
-  } catch {
-    return null;
-  }
+const getQuotedImageUrls = (content?: string): string[] => {
+  const blockUrls = parseImageUrls(content);
+  if (blockUrls.length > 0) return blockUrls;
+  const htmlUrl = extractImageUrl(content || '');
+  return htmlUrl ? [htmlUrl] : [];
 };
 
 // 转换在线用户格式
@@ -301,15 +288,147 @@ export default function ChatroomScreen() {
   const [selectedRedPacketId, setSelectedRedPacketId] = useState<string | null>(null);
   const [selectedRedPacketSender, setSelectedRedPacketSender] = useState<{ name: string; avatar: string; msg: string } | null>(null);
 
-  // 消息长按菜单状态
-  const [contextMenuVisible, setContextMenuVisible] = useState(false);
-  const [selectedMessage, setSelectedMessage] = useState<ChatMessage | null>(null);
+  const [msgMenu, setMsgMenu] = useState({
+    visible: false,
+    x: 0,
+    y: 0,
+    message: null as ChatMessage | null,
+    items: [] as ContextMenuItem[],
+  });
+  const [userMenu, setUserMenu] = useState({
+    visible: false,
+    x: 0,
+    y: 0,
+    userName: '',
+    avatar: '',
+    userId: '',
+  });
+  const [userRemarks, setUserRemarks] = useState<UserRemarksMap>({});
+  const [blacklist, setBlacklist] = useState<BlacklistUser[]>([]);
+  const [remarkModal, setRemarkModal] = useState({
+    visible: false,
+    userId: '',
+    userName: '',
+    value: '',
+  });
 
   // 表情包选择器状态
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // 功能菜单状态
   const [showMenu, setShowMenu] = useState(false);
+
+  const footerBottom = useSharedValue(0);
+  const inputFooterHeightSV = useSharedValue(56);
+
+  const keepInputFocused = useCallback(() => {
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  const scrollToBottomIfNeeded = useCallback(() => {
+    if (isAtBottomRef.current) {
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, []);
+
+  const dismissInputPopups = useCallback(() => {
+    setShowEmojiPicker(false);
+    setShowMenu(false);
+  }, []);
+
+  useEffect(() => {
+    const windowHeight = Dimensions.get('window').height;
+    const frameEvent =
+      Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidChangeFrame';
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const getKeyboardInset = (screenY: number) =>
+      Math.max(0, windowHeight - screenY - tabBarHeight);
+
+    const applyKeyboardFrame = (screenY: number) => {
+      footerBottom.value = getKeyboardInset(screenY);
+    };
+
+    const frameSub = Keyboard.addListener(frameEvent, (event: KeyboardEvent) => {
+      applyKeyboardFrame(event.endCoordinates.screenY);
+    });
+
+    const showSub = Keyboard.addListener(showEvent, (event: KeyboardEvent) => {
+      applyKeyboardFrame(event.endCoordinates.screenY);
+      dismissInputPopups();
+      scrollToBottomIfNeeded();
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      if (Platform.OS === 'android') {
+        applyKeyboardFrame(windowHeight);
+      }
+    });
+
+    return () => {
+      frameSub.remove();
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [dismissInputPopups, footerBottom, scrollToBottomIfNeeded, tabBarHeight]);
+
+  const inputFooterAnimatedStyle = useAnimatedStyle(() => ({
+    bottom: footerBottom.value,
+  }));
+
+  const listAnimatedStyle = useAnimatedStyle(() => ({
+    marginBottom: footerBottom.value + inputFooterHeightSV.value,
+  }));
+
+  const newMessageAnimatedStyle = useAnimatedStyle(() => ({
+    bottom: footerBottom.value + inputFooterHeightSV.value + 12,
+  }));
+
+  const popupAnchorStyle = useAnimatedStyle(() => ({
+    bottom: footerBottom.value + inputFooterHeightSV.value + 8,
+  }));
+
+  const isAdmin = currentUser?.userRole === 'admin';
+
+  const getUserDisplayName = useCallback(
+    (userId?: string | number, userName?: string, userNickname?: string) => {
+      const remark = userId != null ? userRemarks[String(userId)] : undefined;
+      if (remark?.trim()) return remark.trim();
+      if (userNickname?.trim()) return userNickname.trim();
+      return userName || '未知用户';
+    },
+    [userRemarks],
+  );
+
+  const isBlacklisted = useCallback(
+    (userName?: string) => Boolean(userName && blacklist.some((u) => u.userName === userName)),
+    [blacklist],
+  );
+
+  useEffect(() => {
+    const loadPreferences = async () => {
+      const cached = await loadCachedRemarks();
+      setUserRemarks(cached);
+      try {
+        const response = await userRemarkApi.getRemark();
+        if (response.code === 0 && response.data?.content) {
+          const parsed = JSON.parse(response.data.content);
+          if (parsed && typeof parsed === 'object') {
+            setUserRemarks(parsed);
+            await saveCachedRemarks(parsed);
+          }
+        }
+      } catch (error) {
+        console.error('加载用户备注失败:', error);
+      }
+
+      if (currentUser?.userName) {
+        setBlacklist(await loadBlacklist(currentUser.userName));
+      }
+    };
+    loadPreferences();
+  }, [currentUser?.userName]);
 
   // 每次进入 tab 时重新连接 WebSocket 并加载最新消息
   useFocusEffect(
@@ -351,6 +470,10 @@ export default function ChatroomScreen() {
         // 在 setState 之前先记录当前是否在底部（参考 utools wasAtBottom）
         const wasAtBottom = isAtBottomRef.current;
 
+        if (isBlacklisted(newMessage.userName)) {
+          return;
+        }
+
         setMessages((prev) => {
           if (prev.some((m) => m.oId === newMessage.oId || m.id === newMessage.id)) {
             return prev;
@@ -390,7 +513,7 @@ export default function ChatroomScreen() {
       wsManager.offMessageType('chat', handleNewMessage);
       wsManager.offMessageType('online', handleNewMessage);
     };
-  }, [currentUser?.userName]);
+  }, [currentUser?.userName, isBlacklisted]);
 
   // 滚动到底部
   const scrollToBottom = (animated = true) => {
@@ -466,7 +589,7 @@ export default function ChatroomScreen() {
             const key = m.oId || m.id;
             if (seen.has(key)) return false;
             seen.add(key);
-            return true;
+            return !isBlacklisted(m.userName);
           });
           setMessages(uniqueMessages);
           hasInitialScrolledRef.current = false;
@@ -479,7 +602,9 @@ export default function ChatroomScreen() {
           const newMsgs = transformedMessages.reverse();
           setMessages((prev) => {
             const existingIds = new Set(prev.map((m: ChatMessage) => m.oId || m.id));
-            const uniqueNewMsgs = newMsgs.filter((m: ChatMessage) => !existingIds.has(m.oId || m.id));
+            const uniqueNewMsgs = newMsgs.filter(
+              (m: ChatMessage) => !existingIds.has(m.oId || m.id) && !isBlacklisted(m.userName),
+            );
             return [...uniqueNewMsgs, ...prev];
           });
         }
@@ -715,16 +840,242 @@ export default function ChatroomScreen() {
     }
   };
 
-  // 处理消息长按
-  const handleMessageLongPress = (item: ChatMessage) => {
-    setSelectedMessage(item);
-    setContextMenuVisible(true);
+  const closeMenus = () => {
+    setMsgMenu({ visible: false, x: 0, y: 0, message: null, items: [] });
+    setUserMenu({ visible: false, x: 0, y: 0, userName: '', avatar: '', userId: '' });
   };
 
-  // 处理引用消息
+  const openMessageMenu = (item: ChatMessage, x: number, y: number) => {
+    const items = buildMessageContextMenuItems(item, currentUser?.userName, isAdmin);
+    if (items.length === 0) return;
+    setUserMenu({ visible: false, x: 0, y: 0, userName: '', avatar: '', userId: '' });
+    setMsgMenu({ visible: true, x, y, message: item, items });
+  };
+
+  const openUserMenu = (
+    userName: string,
+    avatar: string,
+    userId: string | number | undefined,
+    x: number,
+    y: number,
+  ) => {
+    if (!userName || userName === currentUser?.userName) return;
+    setMsgMenu({ visible: false, x: 0, y: 0, message: null, items: [] });
+    setUserMenu({
+      visible: true,
+      x,
+      y,
+      userName,
+      avatar,
+      userId: userId != null ? String(userId) : '',
+    });
+  };
+
+  const handleMessageLongPress = (item: ChatMessage, x: number, y: number) => {
+    openMessageMenu(item, x, y);
+  };
+
+  const handleAvatarLongPress = (item: ChatMessage, x: number, y: number) => {
+    openUserMenu(
+      item.userName || '',
+      item.userAvatarURL48 || item.userAvatarURL || '',
+      item.userId,
+      x,
+      y,
+    );
+  };
+
   const handleQuote = (message: ChatMessage) => {
     setQuotedMessage(message);
-    inputRef.current?.focus();
+    keepInputFocused();
+  };
+
+  const sendRepeatMessage = (content: string) => {
+    const text = stripHtml(content) || content;
+    if (!text) return;
+
+    const now = Date.now();
+    const optimisticMsg: ChatMessage = {
+      oId: `repeat-${now}`,
+      content: text,
+      md: text,
+      userName: currentUser?.userName || '',
+      userNickname: currentUser?.userNickname || currentUser?.userName || '',
+      userAvatarURL: currentUser?.userAvatar || '',
+      userAvatarURL48: currentUser?.userAvatar || '',
+      time: now,
+      type: 'chat',
+      isHistory: false,
+      isSelf: true,
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+
+    const message = {
+      id: `${now}`,
+      content: text,
+      sender: {
+        id: String(currentUser?.id ?? ''),
+        name: currentUser?.userName || '',
+        avatar: currentUser?.userAvatar || '',
+        level: currentUser?.level || 1,
+        points: currentUser?.points || 0,
+        isAdmin: currentUser?.userRole === 'admin',
+      },
+      timestamp: new Date(now).toISOString(),
+    };
+
+    wsManager.send(
+      JSON.stringify({
+        type: 2,
+        userId: -1,
+        data: { type: 'chat', content: { message } },
+      }),
+      CONNECTION_ID,
+    );
+    toast.success('复读成功');
+  };
+
+  const handleRevokeMessage = async (message: ChatMessage) => {
+    const oId = message.oId || message.id;
+    if (!oId) {
+      toast.error('无法撤回该消息');
+      return;
+    }
+
+    Alert.alert('撤回消息', '确定要撤回这条消息吗？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '确定',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const response = await chatApi.revokeMessage(String(oId));
+            if (response.code === 0) {
+              setMessages((prev) => prev.filter((m) => (m.oId || m.id) !== oId));
+              toast.success('消息已撤回');
+            } else {
+              toast.error(response.msg || '撤回失败');
+            }
+          } catch (error) {
+            console.error('撤回消息失败:', error);
+            toast.error('撤回失败，请稍后再试');
+          }
+        },
+      },
+    ]);
+  };
+
+  const openRemarkEditor = (userId: string, userName: string) => {
+    const key = userId || userName;
+    setRemarkModal({
+      visible: true,
+      userId: key,
+      userName,
+      value: userRemarks[key] || '',
+    });
+  };
+
+  const saveRemark = async () => {
+    const { userId, userName, value } = remarkModal;
+    const trimmed = value.trim();
+    const next = { ...userRemarks };
+    if (trimmed) {
+      next[userId] = trimmed;
+    } else {
+      delete next[userId];
+    }
+
+    try {
+      await userRemarkApi.saveRemark(JSON.stringify(next));
+      setUserRemarks(next);
+      await saveCachedRemarks(next);
+      setRemarkModal({ visible: false, userId: '', userName: '', value: '' });
+      toast.success(trimmed ? '备注已保存' : '备注已删除');
+    } catch (error) {
+      console.error('保存备注失败:', error);
+      toast.error('保存备注失败');
+    }
+  };
+
+  const addToBlacklist = async (userName: string, avatarUrl?: string) => {
+    if (!currentUser?.userName) return;
+    if (blacklist.some((u) => u.userName === userName)) {
+      toast.warning('该用户已在黑名单');
+      return;
+    }
+
+    const next = [...blacklist, { userName, avatarUrl }];
+    setBlacklist(next);
+    await saveBlacklist(currentUser.userName, next);
+    setMessages((prev) => prev.filter((m) => m.userName !== userName));
+    toast.success('已加入黑名单');
+  };
+
+  const handleMessageMenuAction = async (action: string) => {
+    const item = msgMenu.message;
+    closeMenus();
+    if (!item) return;
+
+    const content = item.content || item.md || '';
+
+    switch (action) {
+      case 'quote':
+        handleQuote(item);
+        break;
+      case 'at':
+        if (item.userName) handleAtUser(item.userName);
+        break;
+      case 'copy':
+        await Clipboard.setStringAsync(stripHtml(content) || content);
+        toast.success('复制成功');
+        break;
+      case 'copy-image': {
+        const url = extractImageUrl(content);
+        if (url) {
+          await Clipboard.setStringAsync(url);
+          toast.success('复制成功');
+        }
+        break;
+      }
+      case 'repeat':
+        sendRepeatMessage(content);
+        break;
+      case 'revoke':
+        handleRevokeMessage(item);
+        break;
+      case 'remark':
+        openRemarkEditor(String(item.userId || item.userName || ''), item.userName || '');
+        break;
+      case 'blacklist':
+        addToBlacklist(item.userName || '', item.userAvatarURL48 || item.userAvatarURL);
+        break;
+      case 'add-emoji':
+        toast.info('添加到表情功能即将上线');
+        break;
+      default:
+        break;
+    }
+  };
+
+  const handleUserMenuAction = async (action: string) => {
+    const { userName, avatar, userId } = userMenu;
+    closeMenus();
+
+    switch (action) {
+      case 'at':
+        handleAtUser(userName);
+        break;
+      case 'remark':
+        openRemarkEditor(userId || userName, userName);
+        break;
+      case 'blacklist':
+        await addToBlacklist(userName, avatar);
+        break;
+      default:
+        break;
+    }
   };
 
   // 处理表情选择
@@ -806,19 +1157,12 @@ export default function ChatroomScreen() {
     inputRef.current?.focus();
   };
 
-  // 处理复制
-  const handleCopy = (content: string) => {
-    // 这里可以添加 Clipboard API 来复制内容
-    Alert.alert('提示', '内容已复制到剪贴板');
-  };
-
-  // 处理红包点击
-  const handleRedPacketPress = (item: ChatMessage) => {
-    const redPacketInfo = parseRedPacket(item.content);
+  const handleViewRedPacketDetails = (item: ChatMessage) => {
+    const redPacketInfo = parseRedPacketContent(item.content || item.md);
     if (redPacketInfo?.redPacketId) {
       setSelectedRedPacketId(redPacketInfo.redPacketId);
       setSelectedRedPacketSender({
-        name: item.userName || item.userNickname || '未知用户',
+        name: item.userNickname || item.userName || '未知用户',
         avatar: item.userAvatarURL48 || item.userAvatarURL || '',
         msg: redPacketInfo.msg || '红包',
       });
@@ -888,31 +1232,62 @@ export default function ChatroomScreen() {
     setQuotedMessage(null);
   };
 
+  const renderQuotedContentBody = (quotedContent: string, compact = false) => {
+    if (isRedPacketContent(quotedContent)) {
+      const quotedPacket = parseRedPacketContent(quotedContent);
+      return (
+        <View style={styles.quotedRedPacket}>
+          <Text style={styles.quotedRedPacketIcon}>🧧</Text>
+          <View style={styles.quotedRedPacketInfo}>
+            <Text style={styles.quotedRedPacketType}>红包</Text>
+            <Text style={styles.quotedRedPacketMsg} numberOfLines={1}>
+              {quotedPacket?.msg || '红包'}
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    const quotedImageUrls = getQuotedImageUrls(quotedContent);
+    if (quotedImageUrls.length > 0) {
+      const thumbSize = compact ? 44 : 72;
+      return (
+        <View style={styles.quotedImageRow}>
+          <Image
+            source={{ uri: quotedImageUrls[0] }}
+            style={[styles.quotedImageThumb, { width: thumbSize, height: thumbSize }]}
+            resizeMode="cover"
+          />
+          {quotedImageUrls.length > 1 && (
+            <Text style={[styles.quotedImageMore, { color: theme.icon }]}>
+              +{quotedImageUrls.length - 1}
+            </Text>
+          )}
+        </View>
+      );
+    }
+
+    return (
+      <Text style={[styles.quotedText, { color: theme.icon }]} numberOfLines={compact ? 1 : 2}>
+        {processMessageContent(quotedContent)}
+      </Text>
+    );
+  };
+
   // 渲染引用消息
   const renderQuotedMessage = (quoted: any, isSelf: boolean) => {
     if (!quoted) return null;
 
     const quotedContent = quoted.content || quoted.md || '';
-    const quotedSender = quoted.sender?.name || quoted.userName || '未知用户';
-    const isQuotedRedPacket = isRedPacket(quotedContent);
+    const quotedSender =
+      quoted.sender?.name || quoted.userNickname || quoted.userName || '未知用户';
 
     return (
       <View style={[styles.quotedMessage, { backgroundColor: isSelf ? 'rgba(255,255,255,0.2)' : theme.background }]}>
         <Text style={[styles.quotedSender, { color: theme.tint }]} numberOfLines={1}>
           {quotedSender}
         </Text>
-        {isQuotedRedPacket ? (
-          <View style={styles.quotedRedPacket}>
-            <IconSymbol name="gift.fill" size={14} color="#FF6B6B" />
-            <Text style={[styles.quotedRedPacketText, { color: theme.text }]}>
-              {parseRedPacket(quotedContent)?.msg || '红包'}
-            </Text>
-          </View>
-        ) : (
-          <Text style={[styles.quotedText, { color: theme.icon }]} numberOfLines={2}>
-            {processMessageContent(quotedContent)}
-          </Text>
-        )}
+        {renderQuotedContentBody(quotedContent)}
       </View>
     );
   };
@@ -920,31 +1295,40 @@ export default function ChatroomScreen() {
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     // 使用 userName 来判断是否是当前用户（参考 utools）
     const isSelf = item.userName === currentUser?.userName;
-    const isRedPacketMessage = isRedPacket(item.content);
+    const isRedPacketMessage = isRedPacketContent(item.content || item.md);
     const isImageMsg = isImageMessage(item.content);
     const imageUrls = parseImageUrls(item.content);
     const hasQuotedMessage = item.quotedMessage || (item.rawMessage?.quotedMessage);
     const quoted = item.quotedMessage || item.rawMessage?.quotedMessage;
 
     return (
-      <TouchableOpacity
-        style={[styles.messageRow, isSelf && styles.messageRowSelf]}
-        onLongPress={() => handleMessageLongPress(item)}
-        delayLongPress={500}
-        activeOpacity={1}
-      >
-        <Image
-          source={{ uri: item.userAvatarURL48 || item.userAvatarURL || 'https://api.yucoder.cn/images/default-avatar.png' }}
-          style={styles.avatar}
-        />
-        <View style={[
-          styles.messageBubble,
-          isSelf ? [styles.messageBubbleSelf, { backgroundColor: isDark ? '#3a3a3d' : '#f0f0f0' }] : { backgroundColor: isDark ? '#3a3a3d' : '#f0f0f0' }
-        ]}>
+      <View style={[styles.messageRow, isSelf && styles.messageRowSelf]}>
+        <Pressable
+          onPress={() => item.userName && handleAtUser(item.userName)}
+          onLongPress={(event) =>
+            handleAvatarLongPress(item, event.nativeEvent.pageX, event.nativeEvent.pageY)
+          }
+          delayLongPress={400}
+        >
+          <Image
+            source={{ uri: item.userAvatarURL48 || item.userAvatarURL || 'https://api.yucoder.cn/images/default-avatar.png' }}
+            style={styles.avatar}
+          />
+        </Pressable>
+        <Pressable
+          style={[
+            styles.messageBubble,
+            isSelf ? [styles.messageBubbleSelf, { backgroundColor: isDark ? '#3a3a3d' : '#f0f0f0' }] : { backgroundColor: isDark ? '#3a3a3d' : '#f0f0f0' },
+          ]}
+          onLongPress={(event) =>
+            handleMessageLongPress(item, event.nativeEvent.pageX, event.nativeEvent.pageY)
+          }
+          delayLongPress={400}
+        >
           {/* 非自己的消息显示昵称 */}
-          {!isSelf && item.userNickname && item.userNickname.trim() && (
+          {!isSelf && (
             <Text style={[styles.senderName, { color: isDark ? '#b0b0b0' : '#666' }]}>
-              {item.userNickname}
+              {getUserDisplayName(item.userId, item.userName, item.userNickname)}
             </Text>
           )}
 
@@ -952,20 +1336,17 @@ export default function ChatroomScreen() {
           {hasQuotedMessage && renderQuotedMessage(quoted, isSelf)}
 
           {isRedPacketMessage ? (
-            <TouchableOpacity
-              style={styles.redPacketContainer}
-              onPress={() => handleRedPacketPress(item)}
-              activeOpacity={0.8}
-            >
-              <IconSymbol name="gift.fill" size={20} color="#FF6B6B" />
-              <Text style={[styles.redPacketText, { color: isDark ? '#fff' : '#FF6B6B' }]}>
-                {(parseRedPacket(item.content)?.msg) || '红包'}
-              </Text>
-            </TouchableOpacity>
+            <RedPacketMessageCard
+              message={item}
+              onViewDetails={handleViewRedPacketDetails}
+            />
           ) : isImageMsg && imageUrls.length > 0 ? (
             <ImageMessage
               urls={imageUrls}
               onImagePress={(url) => handleImagePress(imageUrls, imageUrls.indexOf(url))}
+              onLongPress={(event) =>
+                handleMessageLongPress(item, event.nativeEvent.pageX, event.nativeEvent.pageY)
+              }
               isSelf={isSelf}
             />
           ) : (
@@ -976,8 +1357,8 @@ export default function ChatroomScreen() {
           <Text style={[styles.messageTime, { color: theme.icon }]}>
             {item.time ? new Date(item.time).toLocaleTimeString() : ' '}
           </Text>
-        </View>
-      </TouchableOpacity>
+        </Pressable>
+      </View>
     );
   };
 
@@ -1061,83 +1442,97 @@ export default function ChatroomScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* 消息列表 + 输入框，整体被 KeyboardAvoidingView 包裹，键盘弹出时整体上移 */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? tabBarHeight : 0}
-      >
-        {/* 加载更多指示器 */}
-        {isLoadingMore && (
-          <ActivityIndicator style={styles.loadingMore} color={theme.tint} />
-        )}
-
-        {/* 消息列表 */}
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.oId || item.id || `${item.userName}-${item.time}`}
-          contentContainerStyle={styles.messagesList}
-          style={{ opacity: listOpacity, flex: 1 }}
-          onScroll={checkIfAtBottom}
-          scrollEventThrottle={16}
-          onContentSizeChange={(_, newHeight) => {
-            if (!hasInitialScrolledRef.current && newHeight > 0) {
-              flatListRef.current?.scrollToEnd({ animated: false });
-              setTimeout(() => {
-                hasInitialScrolledRef.current = true;
-              }, 300);
-            }
-          }}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: undefined }}
-          onScrollToIndexFailed={(info) => {
-            flatListRef.current?.scrollToOffset({
-              offset: info.averageItemLength * info.index,
-              animated: false,
-            });
-            setListOpacity(1);
-          }}
-        />
+      <View style={styles.chatBody}>
+        {/* 消息列表：底部留白随键盘同步上移，保持在输入框上方 */}
+        <Animated.View style={[styles.listContainer, listAnimatedStyle]}>
+          {(showEmojiPicker || showMenu) && (
+            <Pressable
+              style={styles.popupBackdrop}
+              onPress={() => {
+                setShowEmojiPicker(false);
+                setShowMenu(false);
+              }}
+            />
+          )}
+          {isLoadingMore && (
+            <ActivityIndicator style={styles.loadingMore} color={theme.tint} />
+          )}
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.oId || item.id || `${item.userName}-${item.time}`}
+            contentContainerStyle={styles.messagesList}
+            style={{ opacity: listOpacity, flex: 1 }}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            onScroll={checkIfAtBottom}
+            scrollEventThrottle={16}
+            onContentSizeChange={(_, newHeight) => {
+              if (!hasInitialScrolledRef.current && newHeight > 0) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+                setTimeout(() => {
+                  hasInitialScrolledRef.current = true;
+                }, 300);
+              }
+            }}
+            maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: undefined }}
+            onScrollToIndexFailed={(info) => {
+              flatListRef.current?.scrollToOffset({
+                offset: info.averageItemLength * info.index,
+                animated: false,
+              });
+              setListOpacity(1);
+            }}
+          />
+        </Animated.View>
 
         {/* 新消息提示按钮 */}
         {newMessageCount > 0 && !isAtBottom && (
-          <TouchableOpacity
-            style={styles.newMessageNotification}
-            onPress={() => {
-              flatListRef.current?.scrollToEnd({ animated: true });
-            }}
-          >
-            <IconSymbol name="chevron.down" size={16} color="#fff" />
-            <Text style={styles.newMessageNotificationText}>
-              {newMessageCount} 条新消息
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {/* 引用消息预览 */}
-        {quotedMessage && (
-          <View style={[styles.quotePreviewContainer, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
-            <View style={styles.quotePreviewContent}>
-              <Text style={[styles.quotePreviewText, { color: theme.text }]} numberOfLines={1}>
-                <Text style={{ color: theme.tint, fontWeight: '500' }}>
-                  引用 {quotedMessage.userNickname || quotedMessage.userName}：
-                </Text>
-                {processMessageContent(quotedMessage.content)}
+          <Animated.View style={[styles.newMessageNotification, newMessageAnimatedStyle]}>
+            <TouchableOpacity
+              onPress={() => {
+                flatListRef.current?.scrollToEnd({ animated: true });
+              }}
+            >
+              <IconSymbol name="chevron.down" size={16} color="#fff" />
+              <Text style={styles.newMessageNotificationText}>
+                {newMessageCount} 条新消息
               </Text>
-            </View>
-            <TouchableOpacity onPress={clearQuote}>
-              <IconSymbol name="xmark" size={18} color={theme.icon} />
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         )}
 
-        {/* 输入框 */}
-        <View style={[styles.inputContainer, { backgroundColor: theme.card, borderTopColor: theme.border }]}>
+        {/* 底部输入区：随键盘高度过渡，收起时回落到底部 */}
+        <Animated.View
+          onLayout={(e) => {
+            inputFooterHeightSV.value = e.nativeEvent.layout.height;
+          }}
+          style={[styles.inputFooter, inputFooterAnimatedStyle]}
+        >
+          {quotedMessage && (
+            <View style={[styles.quotePreviewContainer, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+              <View style={styles.quotePreviewContent}>
+                <Text style={[styles.quotePreviewLabel, { color: theme.tint }]} numberOfLines={1}>
+                  引用 {quotedMessage.userNickname || quotedMessage.userName}
+                </Text>
+                {renderQuotedContentBody(quotedMessage.content || quotedMessage.md || '', true)}
+              </View>
+              <TouchableOpacity onPress={clearQuote}>
+                <IconSymbol name="xmark" size={18} color={theme.icon} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={[styles.inputContainer, { backgroundColor: theme.card, borderTopColor: theme.border }]}>
           {/* 表情包按钮 */}
           <TouchableOpacity
             style={[styles.inputButton, { backgroundColor: theme.background }]}
-            onPress={() => setShowEmojiPicker(!showEmojiPicker)}
+            onPress={() => {
+              setShowMenu(false);
+              setShowEmojiPicker((prev) => !prev);
+              keepInputFocused();
+            }}
             activeOpacity={0.7}
           >
             <IconSymbol name="face.smiling" size={22} color={theme.tint} />
@@ -1146,7 +1541,11 @@ export default function ChatroomScreen() {
           {/* 功能菜单按钮 */}
           <TouchableOpacity
             style={[styles.inputButton, { backgroundColor: theme.background, opacity: isUploading ? 0.5 : 1 }]}
-            onPress={() => setShowMenu(!showMenu)}
+            onPress={() => {
+              setShowEmojiPicker(false);
+              setShowMenu((prev) => !prev);
+              keepInputFocused();
+            }}
             disabled={isUploading}
             activeOpacity={0.7}
           >
@@ -1177,8 +1576,71 @@ export default function ChatroomScreen() {
           >
             <IconSymbol name="arrow.up" size={20} color="#fff" />
           </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+          </View>
+        </Animated.View>
+
+        {showEmojiPicker && (
+          <Animated.View
+            style={[styles.emojiBubble, { backgroundColor: theme.card }, popupAnchorStyle]}
+          >
+            <EmojiPicker
+              compact
+              onSelect={(content) => {
+                setShowEmojiPicker(false);
+                handleEmojiSelect(content);
+                keepInputFocused();
+              }}
+              onClose={() => setShowEmojiPicker(false)}
+            />
+          </Animated.View>
+        )}
+
+        {showMenu && (
+          <Animated.View
+            style={[styles.menuBubble, { backgroundColor: theme.card }, popupAnchorStyle]}
+          >
+            <TouchableOpacity
+              style={styles.menuBubbleItem}
+              onPress={() => {
+                setShowMenu(false);
+                pickImage();
+              }}
+            >
+              <View style={[styles.menuBubbleIcon, { backgroundColor: theme.background }]}>
+                <IconSymbol name="photo" size={18} color={theme.tint} />
+              </View>
+              <Text style={[styles.menuBubbleText, { color: theme.text }]}>图片</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuBubbleItem}
+              onPress={() => {
+                setShowMenu(false);
+                setShowEmojiPicker(true);
+                keepInputFocused();
+              }}
+            >
+              <View style={[styles.menuBubbleIcon, { backgroundColor: theme.background }]}>
+                <IconSymbol name="face.smiling" size={18} color={theme.tint} />
+              </View>
+              <Text style={[styles.menuBubbleText, { color: theme.text }]}>表情</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuBubbleItem}
+              onPress={() => {
+                setShowMenu(false);
+                setShowRedPacketDialog(true);
+              }}
+            >
+              <View style={[styles.menuBubbleIcon, { backgroundColor: 'rgba(255, 107, 107, 0.1)' }]}>
+                <IconSymbol name="gift.fill" size={18} color="#FF6B6B" />
+              </View>
+              <Text style={[styles.menuBubbleText, { color: theme.text }]}>红包</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+      </View>
 
       {/* Image Preview Modal */}
       <ImagePreviewModal
@@ -1189,16 +1651,65 @@ export default function ChatroomScreen() {
         onIndexChanged={setCurrentImageIndex}
       />
 
-      {/* 消息长按菜单 */}
-      <MessageContextMenu
-        visible={contextMenuVisible}
-        message={selectedMessage}
-        onClose={() => setContextMenuVisible(false)}
-        onQuote={handleQuote}
-        onAtUser={handleAtUser}
-        onCopy={handleCopy}
-        currentUserName={currentUser?.userName}
+      <ContextMenu
+        visible={msgMenu.visible}
+        x={msgMenu.x}
+        y={msgMenu.y}
+        items={msgMenu.items}
+        onAction={handleMessageMenuAction}
+        onClose={closeMenus}
       />
+
+      <ContextMenu
+        visible={userMenu.visible}
+        x={userMenu.x}
+        y={userMenu.y}
+        items={buildUserContextMenuItems()}
+        onAction={handleUserMenuAction}
+        onClose={closeMenus}
+      />
+
+      <Modal
+        visible={remarkModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRemarkModal({ visible: false, userId: '', userName: '', value: '' })}
+      >
+        <Pressable
+          style={styles.remarkOverlay}
+          onPress={() => setRemarkModal({ visible: false, userId: '', userName: '', value: '' })}
+        >
+          <TouchableWithoutFeedback>
+            <View style={[styles.remarkDialog, { backgroundColor: theme.card }]}>
+            <Text style={[styles.remarkTitle, { color: theme.text }]}>
+              修改备注 · {remarkModal.userName}
+            </Text>
+            <TextInput
+              style={[styles.remarkInput, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
+              placeholder="留空则删除备注"
+              placeholderTextColor={theme.icon}
+              value={remarkModal.value}
+              onChangeText={(value) => setRemarkModal((prev) => ({ ...prev, value }))}
+              maxLength={20}
+            />
+            <View style={styles.remarkActions}>
+              <TouchableOpacity
+                style={[styles.remarkButton, { backgroundColor: theme.background }]}
+                onPress={() => setRemarkModal({ visible: false, userId: '', userName: '', value: '' })}
+              >
+                <Text style={{ color: theme.text }}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.remarkButton, { backgroundColor: theme.tint }]}
+                onPress={saveRemark}
+              >
+                <Text style={{ color: '#fff' }}>保存</Text>
+              </TouchableOpacity>
+            </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </Pressable>
+      </Modal>
 
       {/* 发红包对话框 */}
       <RedPacketDialog
@@ -1217,63 +1728,6 @@ export default function ChatroomScreen() {
         msg={selectedRedPacketSender?.msg}
       />
 
-      {/* 表情包选择器 - 气泡形式 */}
-      {showEmojiPicker && (
-        <View style={[styles.emojiBubble, { backgroundColor: theme.card }]}>
-          <EmojiPicker
-            compact
-            onSelect={(content) => {
-              setShowEmojiPicker(false);
-              handleEmojiSelect(content);
-            }}
-            onClose={() => setShowEmojiPicker(false)}
-          />
-        </View>
-      )}
-
-      {/* 功能菜单 - 输入框上方小气泡 */}
-      {showMenu && (
-        <View style={[styles.menuBubble, { backgroundColor: theme.card }]}>
-          <TouchableOpacity
-            style={styles.menuBubbleItem}
-            onPress={() => {
-              setShowMenu(false);
-              pickImage();
-            }}
-          >
-            <View style={[styles.menuBubbleIcon, { backgroundColor: theme.background }]}>
-              <IconSymbol name="photo" size={18} color={theme.tint} />
-            </View>
-            <Text style={[styles.menuBubbleText, { color: theme.text }]}>图片</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.menuBubbleItem}
-            onPress={() => {
-              setShowMenu(false);
-              setShowEmojiPicker(true);
-            }}
-          >
-            <View style={[styles.menuBubbleIcon, { backgroundColor: theme.background }]}>
-              <IconSymbol name="face.smiling" size={18} color={theme.tint} />
-            </View>
-            <Text style={[styles.menuBubbleText, { color: theme.text }]}>表情</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.menuBubbleItem}
-            onPress={() => {
-              setShowMenu(false);
-              setShowRedPacketDialog(true);
-            }}
-          >
-            <View style={[styles.menuBubbleIcon, { backgroundColor: 'rgba(255, 107, 107, 0.1)' }]}>
-              <IconSymbol name="gift.fill" size={18} color="#FF6B6B" />
-            </View>
-            <Text style={[styles.menuBubbleText, { color: theme.text }]}>红包</Text>
-          </TouchableOpacity>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
@@ -1281,6 +1735,54 @@ export default function ChatroomScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    position: 'relative',
+  },
+  remarkOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  remarkDialog: {
+    borderRadius: 12,
+    padding: 16,
+  },
+  remarkTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  remarkInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    marginBottom: 16,
+  },
+  remarkActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  remarkButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  chatBody: {
+    flex: 1,
+    position: 'relative',
+  },
+  listContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  inputFooter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 20,
   },
   header: {
     flexDirection: 'row',
@@ -1422,19 +1924,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     opacity: 0.5,
   },
-  redPacketContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
-    padding: 8,
-    borderRadius: 8,
-  },
-  redPacketText: {
-    marginLeft: 6,
-    fontSize: 14,
-    color: '#FF6B6B',
-    fontWeight: '500',
-  },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1450,12 +1939,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 8,
   },
+  popupBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
   // 表情包气泡样式 - 输入框上方
   emojiBubble: {
     position: 'absolute',
     left: 12,
-    bottom: 62,
     width: 300,
+    zIndex: 25,
     height: 280,
     borderRadius: 16,
     shadowColor: '#000',
@@ -1469,7 +1962,7 @@ const styles = StyleSheet.create({
   menuBubble: {
     position: 'absolute',
     left: 56,
-    bottom: 62,
+    zIndex: 25,
     flexDirection: 'row',
     borderRadius: 16,
     paddingVertical: 12,
@@ -1520,7 +2013,7 @@ const styles = StyleSheet.create({
   newMessageNotification: {
     position: 'absolute',
     right: 16,
-    bottom: 80,
+    zIndex: 3,
     backgroundColor: '#007AFF',
     borderRadius: 20,
     paddingHorizontal: 12,
@@ -1559,9 +2052,42 @@ const styles = StyleSheet.create({
   quotedRedPacket: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#ff4d4f',
+    borderRadius: 8,
+    marginVertical: 4,
+    alignSelf: 'flex-start',
   },
-  quotedRedPacketText: {
+  quotedRedPacketIcon: {
+    fontSize: 20,
+  },
+  quotedRedPacketInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  quotedRedPacketType: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  quotedRedPacketMsg: {
+    fontSize: 11,
+    color: '#fffbe6',
+  },
+  quotedImageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  quotedImageThumb: {
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.06)',
+  },
+  quotedImageMore: {
     fontSize: 12,
   },
   // 引用输入框预览样式
@@ -1576,8 +2102,10 @@ const styles = StyleSheet.create({
   },
   quotePreviewContent: {
     flex: 1,
+    gap: 4,
   },
-  quotePreviewText: {
+  quotePreviewLabel: {
     fontSize: 13,
+    fontWeight: '500',
   },
 });

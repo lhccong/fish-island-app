@@ -1,6 +1,16 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+/** SecureStore 仅允许字母数字及 . - _ */
+const SECURE_STORE_KEY_REGEX = /^[a-zA-Z0-9._-]+$/;
+
+/** 将任意 storage key 转为 SecureStore 合法格式（保留内存/localStorage 仍用原 key） */
+export function toSecureStoreKey(key: string): string {
+  if (!key || SECURE_STORE_KEY_REGEX.test(key)) return key;
+  const encoded = encodeURIComponent(key).replace(/%/g, '_');
+  return `enc_${encoded}`;
+}
+
 // 内存存储回退（用于 Expo Go 等不支持 SecureStore 的环境）
 const memoryStorage: Map<string, string> = new Map();
 
@@ -31,13 +41,18 @@ const shouldUseSecureStore = async (): Promise<boolean> => {
 // Native (无 SecureStore): 使用内存存储
 
 class Storage {
+  private secureKey(key: string) {
+    return toSecureStoreKey(key);
+  }
+
   async getItem(key: string): Promise<string | null> {
     try {
       if (Platform.OS === 'web') {
         return localStorage.getItem(key);
       }
       if (await shouldUseSecureStore()) {
-        return await SecureStore.getItemAsync(key);
+        const secureKey = this.secureKey(key);
+        return await SecureStore.getItemAsync(secureKey);
       }
       return memoryStorage.get(key) || null;
     } catch (error) {
@@ -53,7 +68,7 @@ class Storage {
         return;
       }
       if (await shouldUseSecureStore()) {
-        await SecureStore.setItemAsync(key, value);
+        await SecureStore.setItemAsync(this.secureKey(key), value);
         return;
       }
       memoryStorage.set(key, value);
@@ -70,7 +85,7 @@ class Storage {
         return;
       }
       if (await shouldUseSecureStore()) {
-        await SecureStore.deleteItemAsync(key);
+        await SecureStore.deleteItemAsync(this.secureKey(key));
         return;
       }
       memoryStorage.delete(key);

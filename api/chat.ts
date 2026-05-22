@@ -32,6 +32,8 @@ export interface ChatMessage {
   roomId?: number;
   isHistory?: boolean;
   isSelf?: boolean;
+  revoked?: boolean;
+  userId?: string | number;
   quotedMessage?: any;
   messageWrapper?: any;
   rawMessage?: any;

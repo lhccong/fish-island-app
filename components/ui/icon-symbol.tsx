@@ -35,6 +35,20 @@ const MAPPING = {
   'plus': 'add',
   'magnifyingglass': 'search',
   'ellipsis': 'more-horiz',
+  'quote.bubble.fill': 'format-quote',
+  'at': 'alternate-email',
+  'doc.on.doc': 'content-copy',
+  'arrow.clockwise': 'replay',
+  'arrow.uturn.backward': 'undo',
+  'pencil': 'edit',
+  'person.slash.fill': 'person-off',
+  'heart': 'favorite-border',
+  'heart.fill': 'favorite',
+  'bubble.left': 'chat-bubble-outline',
+  'trophy.fill': 'emoji-events',
+  'pin.fill': 'push-pin',
+  'trash': 'delete',
+  'bell.fill': 'notifications',
 } as IconMapping;
 
 /**

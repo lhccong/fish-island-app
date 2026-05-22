@@ -32,6 +32,18 @@ export interface Moment {
   commentNum: number;
   createTime: string;
   visibility?: number;
+  isTop?: number;
+}
+
+export interface LotteryWinner {
+  userId: number;
+  userName: string;
+  userAvatar?: string;
+}
+
+export interface MomentsLotteryResult {
+  winners?: LotteryWinner[];
+  commentId?: number;
 }
 
 export interface PageResult<T> {
@@ -100,5 +112,18 @@ export const momentsApi = {
 
   deleteComment(data: { id: string }) {
     return request.post<ApiResponse>('/api/moments/comment/delete', data);
+  },
+
+  /** 朋友圈抽奖（从点赞用户中随机抽取） */
+  startLottery(data: { momentId: number; winnerCount: number }) {
+    return request.post<ApiResponse<MomentsLotteryResult>>('/api/moments/lottery/start', data);
+  },
+
+  topMoment(data: { momentId: number; top: boolean }) {
+    return request.post<ApiResponse>('/api/moments/top', data);
+  },
+
+  topComment(data: { commentId: number; top: boolean }) {
+    return request.post<ApiResponse>('/api/moments/comment/top', data);
   },
 };

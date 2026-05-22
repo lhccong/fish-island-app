@@ -6,11 +6,13 @@ import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Fonts } from '@/constants/theme';
+import { useEventRemind } from '@/contexts/EventRemindContext';
 import { useUser } from '@/contexts/UserContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function ProfileScreen() {
   const { isLoggedIn, userInfo, logout, refreshUserInfo } = useUser();
+  const { unreadCount, openPanel } = useEventRemind();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
@@ -125,6 +127,28 @@ export default function ProfileScreen() {
         </View>
       )}
 
+      {/* 消息通知 */}
+      <TouchableOpacity
+        style={[styles.messageCard, { backgroundColor: theme.card }]}
+        onPress={openPanel}
+        activeOpacity={0.85}
+      >
+        <View style={styles.infoLeft}>
+          <IconSymbol size={18} color={theme.tint} name="bell.fill" style={styles.infoIcon} />
+          <ThemedText style={styles.messageTitle}>消息通知</ThemedText>
+        </View>
+        <View style={styles.messageRight}>
+          {unreadCount > 0 && (
+            <View style={[styles.unreadPill, { backgroundColor: '#ff4d4f' }]}>
+              <ThemedText style={styles.unreadPillText}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </ThemedText>
+            </View>
+          )}
+          <ThemedText style={styles.messageChevron}>›</ThemedText>
+        </View>
+      </TouchableOpacity>
+
       {/* 账号信息 */}
       <View style={[styles.sectionCard, { backgroundColor: theme.card }]}>
         <ThemedText style={styles.sectionTitle}>账号信息</ThemedText>
@@ -193,6 +217,49 @@ const styles = StyleSheet.create({
     height: 140,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
+  },
+  messageCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginTop: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  messageTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 22,
+  },
+  messageRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  messageChevron: {
+    fontSize: 18,
+    opacity: 0.45,
+    lineHeight: 22,
+  },
+  unreadPill: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadPillText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   unauthCard: {
     marginHorizontal: 16,

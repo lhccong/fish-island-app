@@ -1,29 +1,46 @@
 import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  GestureResponderEvent,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 interface ImageMessageProps {
   urls: string[];
   onImagePress: (url: string) => void;
+  onLongPress?: (event: GestureResponderEvent) => void;
   isSelf?: boolean;
 }
 
-export default function ImageMessage({ urls, onImagePress, isSelf = false }: ImageMessageProps) {
+export default function ImageMessage({
+  urls,
+  onImagePress,
+  onLongPress,
+  isSelf = false,
+}: ImageMessageProps) {
   if (!urls || urls.length === 0) return null;
 
-  const renderSingleImage = (url: string) => (
-    <TouchableOpacity
+  const wrapImage = (url: string, children: React.ReactNode, style: object) => (
+    <Pressable
       key={url}
       onPress={() => onImagePress(url)}
-      style={styles.singleImageContainer}
-      activeOpacity={0.8}
+      onLongPress={onLongPress}
+      delayLongPress={400}
+      style={({ pressed }) => [style, pressed && styles.pressed]}
     >
-      <Image
-        source={{ uri: url }}
-        style={styles.singleImage}
-        resizeMode="cover"
-      />
-    </TouchableOpacity>
+      {children}
+    </Pressable>
   );
+
+  const renderSingleImage = (url: string) =>
+    wrapImage(
+      url,
+      <Image source={{ uri: url }} style={styles.singleImage} resizeMode="cover" />,
+      styles.singleImageContainer,
+    );
 
   const renderMultipleImages = () => {
     const maxImages = 9;
@@ -32,20 +49,13 @@ export default function ImageMessage({ urls, onImagePress, isSelf = false }: Ima
     if (displayUrls.length === 2) {
       return (
         <View style={styles.twoImagesContainer}>
-          {displayUrls.map((url) => (
-            <TouchableOpacity
-              key={url}
-              onPress={() => onImagePress(url)}
-              style={styles.twoImageItem}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={{ uri: url }}
-                style={styles.twoImage}
-                resizeMode="cover"
-              />
-            </TouchableOpacity>
-          ))}
+          {displayUrls.map((url) =>
+            wrapImage(
+              url,
+              <Image source={{ uri: url }} style={styles.twoImage} resizeMode="cover" />,
+              styles.twoImageItem,
+            ),
+          )}
         </View>
       );
     }
@@ -53,20 +63,13 @@ export default function ImageMessage({ urls, onImagePress, isSelf = false }: Ima
     if (displayUrls.length >= 3 && displayUrls.length <= 4) {
       return (
         <View style={styles.fourImagesContainer}>
-          {displayUrls.map((url) => (
-            <TouchableOpacity
-              key={url}
-              onPress={() => onImagePress(url)}
-              style={styles.fourImageItem}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={{ uri: url }}
-                style={styles.fourImage}
-                resizeMode="cover"
-              />
-            </TouchableOpacity>
-          ))}
+          {displayUrls.map((url) =>
+            wrapImage(
+              url,
+              <Image source={{ uri: url }} style={styles.fourImage} resizeMode="cover" />,
+              styles.fourImageItem,
+            ),
+          )}
         </View>
       );
     }
@@ -74,27 +77,20 @@ export default function ImageMessage({ urls, onImagePress, isSelf = false }: Ima
     if (displayUrls.length >= 5) {
       return (
         <View style={styles.nineImagesContainer}>
-          {displayUrls.map((url, index) => (
-            <TouchableOpacity
-              key={url}
-              onPress={() => onImagePress(url)}
-              style={styles.nineImageItem}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={{ uri: url }}
-                style={styles.nineImage}
-                resizeMode="cover"
-              />
-              {index === 8 && urls.length > 9 && (
-                <View style={styles.moreImagesOverlay}>
-                  <Text style={styles.moreImagesText}>
-                    +{urls.length - 9}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          ))}
+          {displayUrls.map((url, index) =>
+            wrapImage(
+              url,
+              <>
+                <Image source={{ uri: url }} style={styles.nineImage} resizeMode="cover" />
+                {index === 8 && urls.length > 9 && (
+                  <View style={styles.moreImagesOverlay}>
+                    <Text style={styles.moreImagesText}>+{urls.length - 9}</Text>
+                  </View>
+                )}
+              </>,
+              styles.nineImageItem,
+            ),
+          )}
         </View>
       );
     }
@@ -113,6 +109,9 @@ const styles = StyleSheet.create({
   container: {
     marginTop: 4,
     marginBottom: 4,
+  },
+  pressed: {
+    opacity: 0.85,
   },
   singleImageContainer: {
     borderRadius: 8,
