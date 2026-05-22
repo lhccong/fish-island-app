@@ -1,6 +1,7 @@
 import { itemInstancesApi } from '@/api/itemInstances';
 import { normalizeSkinList, petSkinApi } from '@/api/petSkin';
 import { userApi } from '@/api/user';
+import PetEquipForgeModal from '@/components/pet/PetEquipForgeModal';
 import PetImage from '@/components/PetImage';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -14,7 +15,9 @@ import {
   LEFT_EQUIP_SLOTS,
   RARITY_COLORS,
   RIGHT_EQUIP_SLOTS,
+  SLOT_LABELS,
 } from '@/utils/petConstants';
+import { EQUIP_SLOT_TO_NUM } from '@/utils/petForge';
 import { toast } from '@/utils/toast';
 import { Image } from 'expo-image';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -65,6 +68,9 @@ export default function MyPetPanel({
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState('');
   const [renameLoading, setRenameLoading] = useState(false);
+  const [forgeVisible, setForgeVisible] = useState(false);
+  const [forgeSlot, setForgeSlot] = useState<number | undefined>();
+  const [forgeSlotName, setForgeSlotName] = useState('');
 
   const ITEM_CATEGORIES = [
     { key: undefined as string | undefined, label: '全部' },
@@ -395,6 +401,24 @@ export default function MyPetPanel({
     }
   };
 
+  const openForgeModal = (slotKey: string) => {
+    const slotNum = EQUIP_SLOT_TO_NUM[slotKey];
+    if (!petId || !slotNum) return;
+    setForgeSlot(slotNum);
+    setForgeSlotName(SLOT_LABELS[slotKey] || slot.label);
+    setForgeVisible(true);
+  };
+
+  const onEquipSlotPress = (slot: { key: string; label: string }) => {
+    const equipped = getEquippedItem(slot.key);
+    if (!equipped) return;
+    Alert.alert(slot.label, '选择操作', [
+      { text: '取消', style: 'cancel' },
+      { text: '卸下装备', onPress: () => handleUnequip(slot.key) },
+      { text: '装备锻造', onPress: () => openForgeModal(slot.key) },
+    ]);
+  };
+
   const renderSlot = (slot: { key: string; label: string; icon: string }) => {
     const equipped = getEquippedItem(slot.key);
     const loadingSlot = unequipSlot === slot.key;
@@ -412,7 +436,8 @@ export default function MyPetPanel({
           { backgroundColor: theme.background, borderColor },
           equipped && styles.equipSlotFilled,
         ]}
-        onPress={() => equipped && handleUnequip(slot.key)}
+        onPress={() => onEquipSlotPress(slot)}
+        onLongPress={() => equipped && openForgeModal(slot.key)}
         disabled={!equipped || loadingSlot}
         activeOpacity={equipped ? 0.7 : 1}
       >
@@ -678,6 +703,9 @@ export default function MyPetPanel({
           </View>
           <View style={styles.equipColumn}>{RIGHT_EQUIP_SLOTS.map(renderSlot)}</View>
         </View>
+        <Text style={[styles.equipHint, { color: theme.icon }]}>
+          点击已装备槽位可卸下或锻造，长按直接打开锻造
+        </Text>
 
         <View style={styles.statusSection}>
           <StatusProgress label="❤️ 心情" value={mood} max={maxMood} color="#ff7875" />
@@ -848,6 +876,18 @@ export default function MyPetPanel({
         </View>
       )}
       </ScrollView>
+
+      <PetEquipForgeModal
+        visible={forgeVisible}
+        petId={petId}
+        equipSlot={forgeSlot}
+        slotName={forgeSlotName}
+        onClose={() => {
+          setForgeVisible(false);
+          setForgeSlot(undefined);
+        }}
+        onUpdated={onRefresh}
+      />
     </View>
   );
 }
@@ -894,8 +934,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 6,
   },
+  equipHint: { fontSize: 11, textAlign: 'center', marginBottom: 12 },
   equipColumn: { gap: 10, width: 64 },
   equipSlot: {
     width: 64,

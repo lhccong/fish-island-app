@@ -1,9 +1,11 @@
 import { petApi } from '@/api/pet';
+import PetEquipForgeModal from '@/components/pet/PetEquipForgeModal';
 import PetImage from '@/components/PetImage';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { SLOT_LABELS } from '@/utils/petConstants';
+import { getPetId, SLOT_LABELS } from '@/utils/petConstants';
+import { EQUIP_SLOT_TO_NUM } from '@/utils/petForge';
 import {
   buildEquipStatRows,
   EQUIP_RARITY_COLORS,
@@ -73,6 +75,9 @@ export default function OtherUserPetModal({ visible, target, onClose }: OtherUse
   const [petInfo, setPetInfo] = useState<any>(null);
   const [hasPet, setHasPet] = useState(true);
   const [activeTab, setActiveTab] = useState<ModalTab>('equipment');
+  const [viewForgeVisible, setViewForgeVisible] = useState(false);
+  const [viewForgeSlot, setViewForgeSlot] = useState<number | undefined>();
+  const [viewForgeSlotName, setViewForgeSlotName] = useState('');
 
   const load = useCallback(async () => {
     if (!target?.userId) return;
@@ -118,15 +123,27 @@ export default function OtherUserPetModal({ visible, target, onClose }: OtherUse
   const hunger = Math.floor(Number(petInfo?.hunger ?? 0));
   const exp = Math.floor(Number(petInfo?.exp ?? 0));
 
+  const viewPetId = getPetId(petInfo);
+
+  const openViewForge = (slot: string) => {
+    const slotNum = EQUIP_SLOT_TO_NUM[slot];
+    if (!viewPetId || !slotNum) return;
+    setViewForgeSlot(slotNum);
+    setViewForgeSlotName(SLOT_LABELS[slot] || slot);
+    setViewForgeVisible(true);
+  };
+
   const renderEquippedCard = ([slot, item]: [string, any]) => {
     const rarity = item?.template?.rarity || 1;
     const rarityColor = EQUIP_RARITY_COLORS[rarity] || '#8c8c8c';
     const enhanceLevel = item?.enhanceLevel || 0;
 
     return (
-      <View
+      <TouchableOpacity
         key={slot}
         style={[styles.equipCard, { borderColor: rarityColor, backgroundColor: theme.card }]}
+        onPress={() => openViewForge(slot)}
+        activeOpacity={0.75}
       >
         <View style={styles.equipCardRow}>
           <View style={styles.equipIconWrap}>
@@ -150,7 +167,7 @@ export default function OtherUserPetModal({ visible, target, onClose }: OtherUse
             </Text>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -231,6 +248,9 @@ export default function OtherUserPetModal({ visible, target, onClose }: OtherUse
                 {activeTab === 'equipment' ? (
                   <View>
                     <Text style={[styles.sectionTitle, { color: theme.text }]}>已装备物品</Text>
+                    <Text style={[styles.equipTapHint, { color: theme.icon }]}>
+                      点击装备可查看词条
+                    </Text>
                     {equippedEntries.length === 0 ? (
                       <View style={styles.emptyEquip}>
                         <Text style={{ fontSize: 32 }}>🎒</Text>
@@ -288,6 +308,18 @@ export default function OtherUserPetModal({ visible, target, onClose }: OtherUse
           </TouchableOpacity>
         </View>
       </View>
+
+      <PetEquipForgeModal
+        visible={viewForgeVisible}
+        petId={viewPetId}
+        equipSlot={viewForgeSlot}
+        slotName={viewForgeSlotName}
+        readOnly
+        onClose={() => {
+          setViewForgeVisible(false);
+          setViewForgeSlot(undefined);
+        }}
+      />
     </Modal>
   );
 }
@@ -355,7 +387,8 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   tabScroll: { maxHeight: 320 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', marginBottom: 10 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  equipTapHint: { fontSize: 12, marginBottom: 10 },
   equipGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

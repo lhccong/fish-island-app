@@ -98,34 +98,40 @@ export default function PetGalleryPanel() {
           columnWrapperStyle={styles.gridRow}
           renderItem={({ item }) => (
             <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-              <View style={styles.cardHeader}>
-                {item.icon ? (
-                  <Image source={{ uri: item.icon }} style={styles.icon} contentFit="contain" />
-                ) : (
-                  <Text style={styles.iconPlaceholder}>
-                    {item.category === 'equipment' ? '⚔️' : item.category === 'consumable' ? '🧪' : '💎'}
-                  </Text>
-                )}
-                <View
-                  style={[
-                    styles.rarityBadge,
-                    { backgroundColor: RARITY_COLORS[item.rarity || 1] || '#8c8c8c' },
-                  ]}
-                >
-                  <Text style={styles.rarityText}>{rarityText(item.rarity)}</Text>
+              <View
+                style={[
+                  styles.rarityBadge,
+                  { backgroundColor: RARITY_COLORS[item.rarity || 1] || '#8c8c8c' },
+                ]}
+              >
+                <Text style={styles.rarityText}>{rarityText(item.rarity)}</Text>
+              </View>
+
+              <View style={[styles.cardHeader, { backgroundColor: theme.background }]}>
+                <View style={[styles.iconWrap, { borderColor: theme.border }]}>
+                  {item.icon ? (
+                    <Image source={{ uri: item.icon }} style={styles.icon} contentFit="contain" />
+                  ) : (
+                    <Text style={styles.iconPlaceholder}>
+                      {item.category === 'equipment' ? '⚔️' : item.category === 'consumable' ? '🧪' : '💎'}
+                    </Text>
+                  )}
                 </View>
               </View>
-              <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
-                {item.name || '未知物品'}
-              </Text>
-              <Text style={[styles.meta, { color: theme.icon }]}>
-                {categoryText(item.category)}
-              </Text>
-              {item.description ? (
-                <Text style={[styles.desc, { color: theme.icon }]} numberOfLines={2}>
-                  {item.description}
+
+              <View style={styles.cardBody}>
+                <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+                  {item.name || '未知物品'}
                 </Text>
-              ) : null}
+                <Text style={[styles.meta, { color: theme.icon }]}>
+                  {categoryText(item.category)}
+                </Text>
+                {item.description ? (
+                  <Text style={[styles.desc, { color: theme.icon }]} numberOfLines={2}>
+                    {item.description}
+                  </Text>
+                ) : null}
+              </View>
             </View>
           )}
           ListEmptyComponent={
@@ -178,15 +184,37 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 10,
+    overflow: 'hidden',
     minHeight: 140,
   },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  cardHeader: {
+    padding: 10,
+    alignItems: 'flex-start',
+  },
+  iconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
   icon: { width: 40, height: 40 },
-  iconPlaceholder: { fontSize: 28 },
-  rarityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
-  rarityText: { color: '#fff', fontSize: 10, fontWeight: '600' },
-  name: { fontSize: 13, fontWeight: '600', marginBottom: 4 },
+  iconPlaceholder: { fontSize: 24 },
+  rarityBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  rarityText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  cardBody: { paddingHorizontal: 10, paddingBottom: 10 },
+  name: { fontSize: 13, fontWeight: '600', marginBottom: 4, paddingRight: 36 },
   meta: { fontSize: 11, marginBottom: 4 },
   desc: { fontSize: 11, lineHeight: 15 },
   empty: { textAlign: 'center', marginTop: 40 },
