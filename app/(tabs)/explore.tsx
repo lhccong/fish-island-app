@@ -1,9 +1,11 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import UserDetailModal from '@/components/UserDetailModal';
+import type { UserProfileSnapshot } from '@/components/UserInfoCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors, Fonts } from '@/constants/theme';
 import { useEventRemind } from '@/contexts/EventRemindContext';
@@ -18,11 +20,49 @@ export default function ProfileScreen() {
   const theme = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
 
+  const [showUserDetail, setShowUserDetail] = useState(false);
+  const [detailUser, setDetailUser] = useState<UserProfileSnapshot | null>(null);
+
   useEffect(() => {
     if (isLoggedIn) {
       refreshUserInfo();
     }
   }, [isLoggedIn]);
+
+  const buildPersonalCardUser = useCallback((): UserProfileSnapshot | null => {
+    if (!userInfo) return null;
+    return {
+      id: userInfo.id,
+      userId: userInfo.id,
+      userName: userInfo.userName,
+      userNickname: userInfo.userNickname || userInfo.userName,
+      userAvatar: userInfo.userAvatar,
+      userAvatarURL: userInfo.userAvatar,
+      level: userInfo.level,
+      points: userInfo.points ?? userInfo.userPoint,
+      userPoint: userInfo.userPoint ?? userInfo.points,
+      vip: userInfo.vip,
+      isVip: userInfo.vip,
+      avatarFramerUrl: userInfo.avatarFramerUrl,
+      followerCount: userInfo.followerCount,
+      followingCount: userInfo.followingUserCount,
+      isAdmin: userInfo.userRole === 'admin',
+      userOnlineFlag: userInfo.userOnlineFlag,
+      userProfile: userInfo.userProfile,
+    };
+  }, [userInfo]);
+
+  const openPersonalCard = useCallback(() => {
+    const snapshot = buildPersonalCardUser();
+    if (!snapshot) return;
+    setDetailUser(snapshot);
+    setShowUserDetail(true);
+  }, [buildPersonalCardUser]);
+
+  const handleViewProfile = useCallback(() => {
+    setShowUserDetail(false);
+    router.push('/pet');
+  }, [router]);
 
   const handleLogout = async () => {
     await logout();
@@ -66,7 +106,11 @@ export default function ProfileScreen() {
       <View style={[styles.headerBg, { backgroundColor: theme.tint }]} />
 
       {/* 头像卡片 */}
-      <View style={[styles.profileCard, { backgroundColor: theme.card }]}>
+      <TouchableOpacity
+        style={[styles.profileCard, { backgroundColor: theme.card }]}
+        onPress={openPersonalCard}
+        activeOpacity={0.85}
+      >
         <View style={[styles.avatarWrapper, { borderColor: theme.card }]}>
           {userInfo?.userAvatar ? (
             <Image
@@ -94,7 +138,7 @@ export default function ProfileScreen() {
             <ThemedText style={[styles.vipText, { color: isDark ? '#FFD700' : '#FF8F00' }]}>VIP</ThemedText>
           </View>
         )}
-      </View>
+      </TouchableOpacity>
 
       {/* 统计卡片 */}
       <View style={[styles.statsCard, { backgroundColor: theme.card }]}>
@@ -126,6 +170,32 @@ export default function ProfileScreen() {
           <ThemedText style={styles.bioText}>{userInfo.userProfile}</ThemedText>
         </View>
       )}
+
+      {/* 编辑资料 */}
+      <TouchableOpacity
+        style={[styles.messageCard, { backgroundColor: theme.card }]}
+        onPress={() => router.push('/edit-profile')}
+        activeOpacity={0.85}
+      >
+        <View style={styles.infoLeft}>
+          <IconSymbol size={18} color={theme.tint} name="pencil" style={styles.infoIcon} />
+          <ThemedText style={styles.messageTitle}>编辑资料</ThemedText>
+        </View>
+        <ThemedText style={styles.messageChevron}>›</ThemedText>
+      </TouchableOpacity>
+
+      {/* 个人卡片 */}
+      <TouchableOpacity
+        style={[styles.messageCard, { backgroundColor: theme.card }]}
+        onPress={openPersonalCard}
+        activeOpacity={0.85}
+      >
+        <View style={styles.infoLeft}>
+          <IconSymbol size={18} color={theme.tint} name="person.text.rectangle" style={styles.infoIcon} />
+          <ThemedText style={styles.messageTitle}>个人卡片</ThemedText>
+        </View>
+        <ThemedText style={styles.messageChevron}>›</ThemedText>
+      </TouchableOpacity>
 
       {/* 消息通知 */}
       <TouchableOpacity
@@ -202,6 +272,16 @@ export default function ProfileScreen() {
         <IconSymbol name="arrow.right" size={18} color="#FF5252" />
         <ThemedText style={[styles.logoutButtonText, { color: '#FF5252' }]}>退出登录</ThemedText>
       </TouchableOpacity>
+
+      <UserDetailModal
+        visible={showUserDetail}
+        user={detailUser}
+        onClose={() => {
+          setShowUserDetail(false);
+          setDetailUser(null);
+        }}
+        onViewProfile={handleViewProfile}
+      />
     </ScrollView>
   );
 }

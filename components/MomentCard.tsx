@@ -3,11 +3,14 @@ import ImagePreviewModal from '@/components/ImagePreviewModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { BASE_URL } from '@/constants/api';
 import { Colors } from '@/constants/theme';
+import { extractCommentImages, stripCommentImageMarkers } from '@/utils/fishCircle';
 import { formatRelativeTime } from '@/utils/moyuTime';
-import React, { useRef, useState } from 'react';
+import { resolveAvatarUrl } from '@/utils/userAvatar';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -97,84 +100,250 @@ const actionStyles = StyleSheet.create({
   count: { fontSize: 13, fontWeight: '500', color: '#8c8c8c' },
 });
 
+export type CommentReplyTarget = {
+  anchorId: number;
+  parentId: number;
+  userName: string;
+};
+
+function CommentContent({
+  content,
+  replyUserName,
+  theme,
+}: {
+  content: string;
+  replyUserName?: string;
+  theme: typeof Colors['light'];
+}) {
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const text = stripCommentImageMarkers(content);
+  const imageUrls = extractCommentImages(content);
+
+  return (
+    <>
+      {text || replyUserName ? (
+        <Text style={[commentStyles.content, { color: theme.text }]}>
+          {replyUserName ? (
+            <Text>
+              <Text style={{ color: theme.tint }}>回复 {replyUserName} </Text>
+              {text}
+            </Text>
+          ) : (
+            text
+          )}
+        </Text>
+      ) : null}
+      {imageUrls.length > 0 ? (
+        <View style={commentStyles.cmtImgRow}>
+          {imageUrls.map((url, i) => (
+            <TouchableOpacity key={`${url}-${i}`} onPress={() => setPreviewIndex(i)} activeOpacity={0.85}>
+              <Image source={{ uri: resolveAvatarUrl(url) }} style={commentStyles.cmtImg} resizeMode="cover" />
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
+      {previewIndex !== null ? (
+        <ImagePreviewModal
+          visible
+          images={imageUrls.map(u => resolveAvatarUrl(u))}
+          currentIndex={previewIndex}
+          onClose={() => setPreviewIndex(null)}
+          onIndexChanged={setPreviewIndex}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function CommentInputArea({
+  theme,
+  replyTarget,
+  commentInput,
+  commentImages,
+  commentImageUploading,
+  onCommentChange,
+  onPickImages,
+  onRemoveImage,
+  onSubmit,
+  submittingComment,
+  s,
+  inline = false,
+}: {
+  theme: typeof Colors['light'];
+  replyTarget: CommentReplyTarget | null;
+  commentInput: string;
+  commentImages: string[];
+  commentImageUploading: boolean;
+  onCommentChange: (text: string) => void;
+  onPickImages: () => void;
+  onRemoveImage: (index: number) => void;
+  onSubmit: () => void;
+  submittingComment: boolean;
+  s: ReturnType<typeof cardStyles>;
+  inline?: boolean;
+}) {
+  const canSubmit = !!(commentInput.trim() || commentImages.length);
+
+  return (
+    <View style={[s.inputRow, inline && s.inputRowInline]}>
+      {replyTarget ? (
+        <Text style={[s.replyHint, { color: theme.icon }]}>回复 {replyTarget.userName}</Text>
+      ) : null}
+      {commentImages.length > 0 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.cmtImgPreviewScroll}>
+          <View style={s.cmtImgPreviewRow}>
+            {commentImages.map((url, i) => (
+              <View key={`${url}-${i}`} style={s.cmtImgPreviewWrap}>
+                <Image source={{ uri: resolveAvatarUrl(url) }} style={s.cmtImgPreview} />
+                <TouchableOpacity style={s.cmtImgRemove} onPress={() => onRemoveImage(i)}>
+                  <Text style={{ color: '#fff', fontSize: 10 }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+      ) : null}
+      <View style={s.inputWrap}>
+        <TouchableOpacity
+          style={s.cmtImgAddBtn}
+          onPress={onPickImages}
+          disabled={commentImageUploading || commentImages.length >= 3 || submittingComment}
+        >
+          {commentImageUploading ? (
+            <ActivityIndicator size="small" color={theme.icon} />
+          ) : (
+            <IconSymbol name="photo" size={20} color={theme.icon} />
+          )}
+        </TouchableOpacity>
+        <TextInput
+          style={[s.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+          value={commentInput}
+          onChangeText={onCommentChange}
+          placeholder={replyTarget ? `回复 ${replyTarget.userName}...` : '写评论...'}
+          placeholderTextColor={theme.icon}
+          multiline
+          maxLength={200}
+          autoFocus
+        />
+        <TouchableOpacity
+          style={[s.sendBtn, { backgroundColor: theme.tint }, !canSubmit && { opacity: 0.4 }]}
+          onPress={onSubmit}
+          disabled={!canSubmit || submittingComment || commentImageUploading}
+        >
+          {submittingComment ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={s.sendText}>发送</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 function CommentItem({
   comment,
   meId,
   theme,
   onReply,
   onDelete,
+  rootCommentId,
+  inputAnchorId,
+  renderInputAfter,
+  compact,
 }: {
   comment: MomentComment;
   meId: string;
   theme: typeof Colors['light'];
-  onReply: (c: MomentComment) => void;
+  onReply: (c: MomentComment, rootId?: number) => void;
   onDelete: (id: number, momentId: number) => void;
+  rootCommentId?: number;
+  inputAnchorId: number | 'bottom' | null;
+  renderInputAfter: (anchor: number) => React.ReactNode;
+  compact?: boolean;
 }) {
   const [childrenExpanded, setChildrenExpanded] = useState(false);
   const children = comment.children || [];
+  const avatarSize = compact ? 22 : 28;
+
+  useEffect(() => {
+    if (children.some((ch) => ch.id === inputAnchorId)) {
+      setChildrenExpanded(true);
+    }
+  }, [inputAnchorId, children]);
 
   return (
-    <View style={commentStyles.row}>
-      <Image
-        source={{ uri: comment.userAvatar || `${BASE_URL}/avatar/default` }}
-        style={commentStyles.avatar}
-      />
-      <View style={commentStyles.body}>
-        <Text style={[commentStyles.name, { color: theme.tint }]}>{comment.userName}</Text>
-        <Text style={[commentStyles.content, { color: theme.text }]}>
-          {comment.replyUserName ? (
-            <Text>
-              <Text style={{ color: theme.tint }}>回复 {comment.replyUserName} </Text>
-              {comment.content}
+    <View style={commentStyles.block}>
+      <View style={commentStyles.row}>
+        <Image
+          source={{ uri: comment.userAvatar || `${BASE_URL}/avatar/default` }}
+          style={[
+            commentStyles.avatar,
+            { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 },
+          ]}
+        />
+        <View style={commentStyles.body}>
+          <Text style={[commentStyles.name, { color: theme.tint }]}>{comment.userName}</Text>
+          <CommentContent
+            content={comment.content}
+            replyUserName={comment.replyUserName}
+            theme={theme}
+          />
+          <View style={commentStyles.meta}>
+            <Text style={{ fontSize: 11, color: theme.icon }}>
+              {formatRelativeTime(comment.createTime)}
             </Text>
-          ) : (
-            comment.content
-          )}
-        </Text>
-        <View style={commentStyles.meta}>
-          <Text style={{ fontSize: 11, color: theme.icon }}>{formatRelativeTime(comment.createTime)}</Text>
-          <TouchableOpacity onPress={() => onReply(comment)}>
-            <Text style={{ fontSize: 11, color: theme.icon }}>回复</Text>
-          </TouchableOpacity>
-          {String(comment.userId) === meId && (
-            <TouchableOpacity onPress={() => onDelete(comment.id, comment.momentId)}>
-              <Text style={{ fontSize: 11, color: '#ff4757' }}>删除</Text>
+            <TouchableOpacity onPress={() => onReply(comment, rootCommentId)}>
+              <Text style={{ fontSize: 11, color: theme.icon }}>回复</Text>
             </TouchableOpacity>
-          )}
+            {String(comment.userId) === meId && (
+              <TouchableOpacity onPress={() => onDelete(comment.id, comment.momentId)}>
+                <Text style={{ fontSize: 11, color: '#ff4757' }}>删除</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
-        {children.length > 0 && (
-          <>
-            <TouchableOpacity onPress={() => setChildrenExpanded(e => !e)} style={{ marginTop: 6 }}>
-              <Text style={{ fontSize: 12, color: theme.tint }}>
-                {childrenExpanded ? '收起回复' : `查看 ${children.length} 条回复`}
-              </Text>
-            </TouchableOpacity>
-            {childrenExpanded &&
-              children.map(child => (
-                <View key={child.id} style={{ marginTop: 10 }}>
-                  <CommentItem
-                    comment={child}
-                    meId={meId}
-                    theme={theme}
-                    onReply={onReply}
-                    onDelete={onDelete}
-                  />
-                </View>
-              ))}
-          </>
-        )}
       </View>
+      {inputAnchorId === comment.id ? renderInputAfter(comment.id) : null}
+      {children.length > 0 && (
+        <>
+          <TouchableOpacity onPress={() => setChildrenExpanded(e => !e)} style={{ marginTop: 6, marginLeft: compact ? 30 : 36 }}>
+            <Text style={{ fontSize: 12, color: theme.tint }}>
+              {childrenExpanded ? '收起回复' : `查看 ${children.length} 条回复`}
+            </Text>
+          </TouchableOpacity>
+          {childrenExpanded &&
+            children.map(child => (
+              <View key={child.id} style={{ marginTop: 10, marginLeft: compact ? 0 : 8 }}>
+                <CommentItem
+                  comment={child}
+                  meId={meId}
+                  theme={theme}
+                  onReply={onReply}
+                  onDelete={onDelete}
+                  rootCommentId={comment.id}
+                  inputAnchorId={inputAnchorId}
+                  renderInputAfter={renderInputAfter}
+                  compact
+                />
+              </View>
+            ))}
+        </>
+      )}
     </View>
   );
 }
 
 const commentStyles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  block: { marginBottom: 10 },
+  row: { flexDirection: 'row', gap: 8 },
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#eee', flexShrink: 0 },
   body: { flex: 1, flexShrink: 1, minWidth: 0 },
   name: { fontSize: 13, fontWeight: '600', marginBottom: 2 },
   content: { fontSize: 13, lineHeight: 18 },
   meta: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  cmtImgRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
+  cmtImg: { width: 72, height: 72, borderRadius: 6, backgroundColor: '#eee' },
 });
 
 export interface MomentCardProps {
@@ -192,9 +361,13 @@ export interface MomentCardProps {
   onReward?: (m: Moment) => void;
   onOpenMoreMenu?: (m: Moment, x: number, y: number) => void;
   commentInput: string;
+  commentImages: string[];
+  commentImageUploading: boolean;
   onCommentChange: (text: string) => void;
+  onPickCommentImages: () => void;
+  onRemoveCommentImage: (index: number) => void;
   onSubmitComment: (momentId: number) => void;
-  replyTarget: MomentComment | null;
+  replyTarget: CommentReplyTarget | null;
   submittingComment: boolean;
 }
 
@@ -213,7 +386,11 @@ export default function MomentCard({
   onReward,
   onOpenMoreMenu,
   commentInput,
+  commentImages,
+  commentImageUploading,
   onCommentChange,
+  onPickCommentImages,
+  onRemoveCommentImage,
   onSubmitComment,
   replyTarget,
   submittingComment,
@@ -239,6 +416,48 @@ export default function MomentCard({
   const visibleComments = expanded ? comments : comments.slice(0, 3);
   const hasMore = comments.length > 3;
   const likeColor = item.liked ? '#ff4d4f' : '#8c8c8c';
+
+  const hasComments = comments.length > 0;
+
+  const inputAnchorId: number | 'bottom' | 'first' | null = showInput
+    ? hasComments
+      ? replyTarget
+        ? replyTarget.anchorId
+        : 'bottom'
+      : !replyTarget
+        ? 'first'
+        : null
+    : null;
+
+  const renderCommentInput = (anchor: number | 'bottom' | 'first') => {
+    if (inputAnchorId !== anchor) return null;
+    const input = (
+      <CommentInputArea
+        theme={theme}
+        replyTarget={replyTarget}
+        commentInput={commentInput}
+        commentImages={commentImages}
+        commentImageUploading={commentImageUploading}
+        onCommentChange={onCommentChange}
+        onPickImages={onPickCommentImages}
+        onRemoveImage={onRemoveCommentImage}
+        onSubmit={() => onSubmitComment(item.id)}
+        submittingComment={submittingComment}
+        s={s}
+        inline={typeof anchor === 'number'}
+      />
+    );
+    if (anchor === 'first') {
+      return (
+        <View style={[s.firstCommentWrap, { borderTopColor: theme.border }]}>
+          {input}
+        </View>
+      );
+    }
+    return input;
+  };
+
+  const renderInputAfter = (anchor: number) => renderCommentInput(anchor);
 
   return (
     <View style={[s.card, item.isTop === 1 && s.cardPinned]}>
@@ -324,7 +543,9 @@ export default function MomentCard({
             </View>
           </View>
 
-          {comments.length > 0 && (
+          {renderCommentInput('first')}
+
+          {hasComments && (
             <View style={[s.commentSection, { borderTopColor: theme.border }]}>
               {visibleComments.map(c => (
                 <CommentItem
@@ -332,8 +553,10 @@ export default function MomentCard({
                   comment={c}
                   meId={meId}
                   theme={theme}
-                  onReply={comment => onReply(comment, item.id)}
+                  onReply={(comment, rootId) => onReply(comment, item.id, rootId)}
                   onDelete={onDeleteComment}
+                  inputAnchorId={inputAnchorId}
+                  renderInputAfter={renderInputAfter}
                 />
               ))}
               {hasMore && (
@@ -343,34 +566,7 @@ export default function MomentCard({
                   </Text>
                 </TouchableOpacity>
               )}
-            </View>
-          )}
-
-          {showInput && (
-            <View style={s.inputRow}>
-              {replyTarget && <Text style={[s.replyHint, { color: theme.icon }]}>回复 {replyTarget.userName}</Text>}
-              <View style={s.inputWrap}>
-                <TextInput
-                  style={[s.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
-                  value={commentInput}
-                  onChangeText={onCommentChange}
-                  placeholder={replyTarget ? `回复 ${replyTarget.userName}...` : '写评论...'}
-                  placeholderTextColor={theme.icon}
-                  multiline
-                  maxLength={200}
-                />
-                <TouchableOpacity
-                  style={[s.sendBtn, { backgroundColor: theme.tint }, !commentInput.trim() && { opacity: 0.4 }]}
-                  onPress={() => onSubmitComment(item.id)}
-                  disabled={!commentInput.trim() || submittingComment}
-                >
-                  {submittingComment ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={s.sendText}>发送</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+              {renderCommentInput('bottom')}
             </View>
           )}
         </View>
@@ -429,6 +625,12 @@ const cardStyles = (theme: typeof Colors['light']) =>
     },
     expandText: { fontSize: 12, marginTop: 6 },
     inputRow: { marginTop: 8 },
+    inputRowInline: { marginLeft: 36, marginBottom: 4 },
+    firstCommentWrap: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
     replyHint: { fontSize: 12, marginBottom: 4 },
     inputWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
     input: {
@@ -442,4 +644,24 @@ const cardStyles = (theme: typeof Colors['light']) =>
     },
     sendBtn: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
     sendText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+    cmtImgPreviewScroll: { marginBottom: 6 },
+    cmtImgPreviewRow: { flexDirection: 'row', gap: 8 },
+    cmtImgPreviewWrap: { position: 'relative' },
+    cmtImgPreview: { width: 56, height: 56, borderRadius: 6, backgroundColor: '#eee' },
+    cmtImgRemove: {
+      position: 'absolute',
+      top: -5,
+      right: -5,
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cmtImgAddBtn: {
+      paddingHorizontal: 6,
+      paddingVertical: 8,
+      justifyContent: 'center',
+    },
   });

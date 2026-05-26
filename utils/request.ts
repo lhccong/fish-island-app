@@ -59,7 +59,7 @@ class Request {
               } else {
                 // 对象类型的 body，将 apiKey 添加到请求体中
                 config.data = {
-                  ...config.data,
+                  ...(config.data ?? {}),
                   apiKey: apiKey,
                 };
               }

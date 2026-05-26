@@ -1,20 +1,29 @@
+import { followApi } from '@/api/follow';
 import type { Moment, MomentComment, MomentsLotteryResult } from '@/api/moments';
 import { momentsApi } from '@/api/moments';
+import { userApi } from '@/api/user';
 import ContextMenu, { ContextMenuItem } from '@/components/ContextMenu';
 import MomentCard from '@/components/MomentCard';
 import MomentLotteryModal from '@/components/MomentLotteryModal';
 import MomentPublishModal from '@/components/MomentPublishModal';
+import UserDetailModal from '@/components/UserDetailModal';
+import type { UserProfileSnapshot } from '@/components/UserInfoCard';
 import { Colors } from '@/constants/theme';
 import { useUser } from '@/contexts/UserContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { buildMomentContextMenuItems } from '@/utils/momentContextMenu';
 import { toast } from '@/utils/toast';
-import React, { useCallback, useEffect, useState } from 'react';
+import { pickUserAvatar, resolveAvatarUrl } from '@/utils/userAvatar';
+import { useLocalSearchParams } from 'expo-router';
+import { Image as ExpoImage } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Modal,
+  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -31,6 +40,8 @@ export default function MomentsScreen() {
   const theme = Colors[colorScheme ?? 'light'];
   const { userInfo, isLoggedIn } = useUser();
   const meId = String(userInfo?.id ?? '');
+  const params = useLocalSearchParams<{ filterUserId?: string; filterUserName?: string }>();
+  const appliedRouteFilterRef = useRef<string | null>(null);
 
   const [moments, setMoments] = useState<Moment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -42,8 +53,14 @@ export default function MomentsScreen() {
   const [commentsMap, setCommentsMap] = useState<Record<number, MomentComment[]>>({});
   const [openCommentId, setOpenCommentId] = useState<number | null>(null);
   const [commentInput, setCommentInput] = useState('');
-  const [replyTarget, setReplyTarget] = useState<MomentComment | null>(null);
+  const [replyTarget, setReplyTarget] = useState<{
+    anchorId: number;
+    parentId: number;
+    userName: string;
+  } | null>(null);
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [commentImagesMap, setCommentImagesMap] = useState<Record<number, string[]>>({});
+  const [commentImageUploadingId, setCommentImageUploadingId] = useState<number | null>(null);
   const [publishVisible, setPublishVisible] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [editingMoment, setEditingMoment] = useState<Moment | null>(null);
@@ -72,6 +89,11 @@ export default function MomentsScreen() {
   // user filter state
   const [filterUserId, setFilterUserId] = useState<number | null>(null);
   const [filterUserName, setFilterUserName] = useState<string>('');
+  const [profileUser, setProfileUser] = useState<UserProfileSnapshot | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+  const [userDetailVisible, setUserDetailVisible] = useState(false);
 
   const loadComments = useCallback(async (momentId: number) => {
     try {
@@ -119,6 +141,55 @@ export default function MomentsScreen() {
 
   useEffect(() => { fetchMoments(1); }, []);
 
+  const loadProfileUser = useCallback(async (userId: number) => {
+    setProfileLoading(true);
+    setIsFollowing(false);
+    try {
+      const res = await userApi.getUserVoById(userId);
+      if (res.code === 0 && res.data) {
+        setProfileUser(res.data as UserProfileSnapshot);
+      } else {
+        setProfileUser({ id: userId, userName: filterUserName });
+      }
+      if (isLoggedIn && String(userId) !== meId) {
+        const followRes = await followApi.isFollowing(userId);
+        const data = followRes?.data;
+        setIsFollowing(!!(data === true || (followRes.code === 0 && data)));
+      }
+    } catch {
+      setProfileUser({ id: userId, userName: filterUserName });
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [filterUserName, isLoggedIn, meId]);
+
+  useEffect(() => {
+    if (filterUserId == null) {
+      setProfileUser(null);
+      setIsFollowing(false);
+      return;
+    }
+    loadProfileUser(filterUserId);
+  }, [filterUserId, loadProfileUser]);
+
+  useEffect(() => {
+    const rawId = params.filterUserId;
+    if (!rawId || appliedRouteFilterRef.current === rawId) return;
+    const userId = Number(rawId);
+    if (Number.isNaN(userId)) return;
+    appliedRouteFilterRef.current = rawId;
+    const userName =
+      typeof params.filterUserName === 'string' ? params.filterUserName : '';
+    setFilterUserId(userId);
+    setFilterUserName(userName);
+    setMoments([]);
+    setCommentsMap({});
+    setPage(1);
+    setHasMore(true);
+    setError(null);
+    fetchMoments(1, false, userId);
+  }, [params.filterUserId, params.filterUserName, fetchMoments]);
+
   const onRefresh = useCallback(() => fetchMoments(1, true, filterUserId ?? undefined), [fetchMoments, filterUserId]);
   const onEndReached = useCallback(() => { if (!loadingMore && hasMore) fetchMoments(page + 1, false, filterUserId ?? undefined); }, [loadingMore, hasMore, page, fetchMoments, filterUserId]);
 
@@ -133,9 +204,39 @@ export default function MomentsScreen() {
     fetchMoments(1, false, userId);
   }, [fetchMoments]);
 
+  const handleToggleFollow = useCallback(async () => {
+    if (!filterUserId || !isLoggedIn || String(filterUserId) === meId) return;
+    setFollowLoading(true);
+    try {
+      const res = await followApi.toggleFollow(filterUserId);
+      if (res.code === 0) {
+        const nowFollowing = !!res.data;
+        setIsFollowing(nowFollowing);
+        setProfileUser((prev) =>
+          prev
+            ? {
+                ...prev,
+                followerCount: Math.max(
+                  0,
+                  (Number(prev.followerCount) || 0) + (nowFollowing ? 1 : -1),
+                ),
+              }
+            : prev,
+        );
+        toast.success(nowFollowing ? '关注成功' : '已取消关注');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || '操作失败');
+    } finally {
+      setFollowLoading(false);
+    }
+  }, [filterUserId, isLoggedIn, meId]);
+
   const handleBack = useCallback(() => {
     setFilterUserId(null);
     setFilterUserName('');
+    setProfileUser(null);
+    setIsFollowing(false);
     setMoments([]);
     setCommentsMap({});
     setPage(1);
@@ -160,29 +261,127 @@ export default function MomentsScreen() {
     } catch {}
   }, [isLoggedIn, userInfo]);
 
-  const handleToggleComment = useCallback((id: number) => {
-    if (openCommentId === id) { setOpenCommentId(null); setReplyTarget(null); }
-    else { setOpenCommentId(id); setReplyTarget(null); if (!commentsMap[id]) loadComments(id); }
+  const clearCommentDraft = useCallback((momentId?: number) => {
     setCommentInput('');
-  }, [openCommentId, commentsMap, loadComments]);
+    setReplyTarget(null);
+    if (momentId != null) {
+      setCommentImagesMap(prev => {
+        const next = { ...prev };
+        delete next[momentId];
+        return next;
+      });
+    }
+  }, []);
 
-  const handleReply = useCallback((comment: MomentComment, momentId: number) => {
-    setOpenCommentId(momentId); setReplyTarget(comment); setCommentInput('');
+  const handleToggleComment = useCallback((id: number) => {
+    if (openCommentId === id) {
+      setOpenCommentId(null);
+      clearCommentDraft(id);
+    } else {
+      if (openCommentId != null) clearCommentDraft(openCommentId);
+      setOpenCommentId(id);
+      setReplyTarget(null);
+      if (!commentsMap[id]) loadComments(id);
+      setCommentInput('');
+    }
+  }, [openCommentId, commentsMap, loadComments, clearCommentDraft]);
+
+  const handleReply = useCallback(
+    (comment: MomentComment, momentId: number, rootCommentId?: number) => {
+      setOpenCommentId(momentId);
+      setReplyTarget({
+        anchorId: comment.id,
+        parentId: rootCommentId ?? comment.id,
+        userName: comment.userName,
+      });
+      setCommentInput('');
+    },
+    [],
+  );
+
+  const handlePickCommentImages = useCallback(
+    async (momentId: number) => {
+      const current = commentImagesMap[momentId] || [];
+      if (current.length >= 3) {
+        Alert.alert('提示', '最多添加 3 张图片');
+        return;
+      }
+      try {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('权限请求', '需要访问相册权限才能选择图片');
+          return;
+        }
+        const remaining = 3 - current.length;
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsMultipleSelection: true,
+          quality: 0.8,
+          selectionLimit: remaining,
+        });
+        if (result.canceled || !result.assets?.length) return;
+
+        setCommentImageUploadingId(momentId);
+        const uploaded: string[] = [];
+        for (const [index, asset] of result.assets.entries()) {
+          const ext =
+            asset.fileName?.split('.').pop()?.toLowerCase() ||
+            asset.mimeType?.split('/').pop() ||
+            'jpg';
+          const fileName = asset.fileName || `comment_${Date.now()}_${index}.${ext}`;
+          const res = await userApi.uploadPostImage(
+            asset.uri,
+            fileName,
+            asset.mimeType || 'image/jpeg',
+          );
+          if (res.data) uploaded.push(res.data);
+        }
+        if (uploaded.length === 0) {
+          Alert.alert('上传失败', '图片上传失败，请稍后重试');
+          return;
+        }
+        setCommentImagesMap(prev => ({
+          ...prev,
+          [momentId]: [...(prev[momentId] || []), ...uploaded].slice(0, 3),
+        }));
+      } catch (e: any) {
+        Alert.alert('上传失败', e?.message || '请稍后重试');
+      } finally {
+        setCommentImageUploadingId(null);
+      }
+    },
+    [commentImagesMap],
+  );
+
+  const handleRemoveCommentImage = useCallback((momentId: number, index: number) => {
+    setCommentImagesMap(prev => {
+      const list = [...(prev[momentId] || [])];
+      list.splice(index, 1);
+      return { ...prev, [momentId]: list };
+    });
   }, []);
 
   const handleSubmitComment = useCallback(async (momentId: number) => {
-    if (!commentInput.trim()) return;
+    const text = commentInput.trim();
+    const images = commentImagesMap[momentId] || [];
+    if (!text && !images.length) return;
     if (!isLoggedIn) { Alert.alert('提示', '请先登录'); return; }
     setSubmittingComment(true);
     try {
-      const res = await momentsApi.addComment({ momentId, content: commentInput.trim(), parentId: replyTarget?.id });
+      const imgPart = images.map(url => `[img:${url}]`).join('');
+      const content = text + imgPart;
+      const res = await momentsApi.addComment({
+        momentId,
+        content,
+        parentId: replyTarget?.parentId,
+      });
       if (res.code !== 0) { Alert.alert('失败', res.message || '评论失败'); return; }
-      setCommentInput(''); setReplyTarget(null);
+      clearCommentDraft(momentId);
       await loadComments(momentId);
       setMoments(prev => prev.map(m => m.id === momentId ? { ...m, commentNum: m.commentNum + 1 } : m));
     } catch { Alert.alert('失败', '评论失败'); }
     finally { setSubmittingComment(false); }
-  }, [commentInput, isLoggedIn, replyTarget, loadComments]);
+  }, [commentInput, commentImagesMap, isLoggedIn, replyTarget, loadComments, clearCommentDraft]);
 
   const handleDeleteComment = useCallback(async (commentId: number, momentId: number) => {
     Alert.alert('确认', '删除这条评论？', [
@@ -394,6 +593,78 @@ export default function MomentsScreen() {
 
   const s = screenStyles(theme);
 
+  const viewingOtherUser =
+    filterUserId != null && isLoggedIn && String(filterUserId) !== meId;
+  const viewingProfile = filterUserId != null;
+  const coverDisplayName =
+    profileUser?.userName || profileUser?.userNickname || filterUserName || '用户';
+  const coverAvatar = pickUserAvatar(profileUser);
+  const coverBg = profileUser?.momentsBgUrl
+    ? resolveAvatarUrl(profileUser.momentsBgUrl)
+    : null;
+  const coverFollowingCount =
+    profileUser?.followingCount ?? profileUser?.followingUserCount;
+
+  const renderCoverHeader = () => {
+    if (!viewingProfile) return null;
+    const followLabel = isFollowing ? '✓ 已关注' : '+ 关注';
+    return (
+      <View style={s.coverWrap}>
+        <View style={s.coverBg}>
+          {coverBg ? (
+            <ExpoImage source={{ uri: coverBg }} style={s.coverBgImg} contentFit="cover" />
+          ) : null}
+        </View>
+        <View style={s.coverUserInfo}>
+          <Text style={s.coverUserName}>{coverDisplayName}</Text>
+          {viewingOtherUser ? (
+            <TouchableOpacity
+              style={[
+                s.coverFollowBtn,
+                isFollowing ? s.coverFollowBtnActive : s.coverFollowBtnDefault,
+              ]}
+              onPress={handleToggleFollow}
+              disabled={followLoading}
+            >
+              {followLoading ? (
+                <ActivityIndicator size="small" color={isFollowing ? '#666' : '#fff'} />
+              ) : (
+                <Text
+                  style={[
+                    s.coverFollowBtnText,
+                    isFollowing && s.coverFollowBtnTextActive,
+                  ]}
+                >
+                  {followLabel}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : null}
+          {profileUser ? (
+            <View style={s.coverStats}>
+              <Text style={s.coverStatText}>
+                <Text style={s.coverStatNum}>{coverFollowingCount ?? '-'}</Text> 关注
+              </Text>
+              <View style={s.coverStatDivider} />
+              <Text style={s.coverStatText}>
+                <Text style={s.coverStatNum}>{profileUser.followerCount ?? '-'}</Text> 粉丝
+              </Text>
+            </View>
+          ) : profileLoading ? (
+            <ActivityIndicator color="#fff" size="small" style={{ marginBottom: 8 }} />
+          ) : null}
+          <Pressable
+            onPress={() => {
+              if (viewingOtherUser && profileUser) setUserDetailVisible(true);
+            }}
+          >
+            <ExpoImage source={{ uri: coverAvatar }} style={s.coverAvatar} contentFit="cover" />
+          </Pressable>
+        </View>
+      </View>
+    );
+  };
+
   const renderItem = useCallback(({ item }: { item: Moment }) => (
     <MomentCard
       item={item} meId={meId} isAdmin={isAdmin} theme={theme}
@@ -405,29 +676,39 @@ export default function MomentsScreen() {
       onReward={(m) => { setRewardMomentId(m.id); setRewardPoints('10'); }}
       onOpenMoreMenu={openMomentMoreMenu}
       commentInput={openCommentId === item.id ? commentInput : ''}
-      onCommentChange={setCommentInput} onSubmitComment={handleSubmitComment}
+      commentImages={openCommentId === item.id ? commentImagesMap[item.id] || [] : []}
+      commentImageUploading={commentImageUploadingId === item.id}
+      onCommentChange={setCommentInput}
+      onPickCommentImages={() => handlePickCommentImages(item.id)}
+      onRemoveCommentImage={(ix) => handleRemoveCommentImage(item.id, ix)}
+      onSubmitComment={handleSubmitComment}
       replyTarget={openCommentId === item.id ? replyTarget : null}
       submittingComment={submittingComment}
     />
   ), [meId, isAdmin, theme, commentsMap, openCommentId, handleLike, handleToggleComment,
     handleReply, handleDeleteComment, handleDeleteMoment, handleAvatarPress, openMomentMoreMenu,
-    commentInput, handleSubmitComment, replyTarget, submittingComment]);
+    commentInput, commentImagesMap, commentImageUploadingId, handlePickCommentImages,
+    handleRemoveCommentImage, handleSubmitComment, replyTarget, submittingComment]);
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
-      <View style={s.header}>
-        {filterUserId != null && (
+      {!viewingProfile ? (
+        <View style={s.header}>
+          <Text style={s.headerTitle}>鱼小圈</Text>
+          {isLoggedIn && (
+            <TouchableOpacity onPress={handleViewSelf} style={s.myCircleBtn}>
+              <Text style={{ color: theme.tint, fontSize: 14, fontWeight: '600' }}>我的</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : (
+        <View style={s.headerCompact}>
           <TouchableOpacity onPress={handleBack} style={s.backBtn}>
             <Text style={[s.backText, { color: theme.tint }]}>‹ 返回</Text>
           </TouchableOpacity>
-        )}
-        <Text style={s.headerTitle}>{filterUserId != null ? filterUserName : '鱼小圈'}</Text>
-        {filterUserId == null && isLoggedIn && (
-          <TouchableOpacity onPress={handleViewSelf} style={s.myCircleBtn}>
-            <Text style={{ color: theme.tint, fontSize: 14, fontWeight: '600' }}>我的</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+        </View>
+      )}
+      {viewingProfile ? renderCoverHeader() : null}
       {loading && moments.length === 0 ? (
         <View style={s.center}><ActivityIndicator color={theme.tint} size="large" /></View>
       ) : error && moments.length === 0 ? (
@@ -551,6 +832,11 @@ export default function MomentsScreen() {
           </View>
         </Modal>
       )}
+      <UserDetailModal
+        visible={userDetailVisible}
+        user={profileUser}
+        onClose={() => setUserDetailVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -558,10 +844,103 @@ export default function MomentsScreen() {
 const screenStyles = (theme: typeof Colors['light']) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.background },
   header: { paddingHorizontal: 16, paddingVertical: 12, backgroundColor: theme.card, borderBottomWidth: 1, borderBottomColor: theme.border, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerCompact: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: theme.card,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   myCircleBtn: { marginLeft: 'auto' },
   backBtn: { paddingRight: 4 },
   backText: { fontSize: 17, fontWeight: '500' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: theme.text },
+  coverWrap: {
+    height: 200,
+    backgroundColor: '#e8e8e8',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  coverBg: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#d8d8d8',
+  },
+  coverBgImg: {
+    width: '100%',
+    height: '100%',
+  },
+  coverUserInfo: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  coverUserName: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+    marginBottom: 6,
+  },
+  coverFollowBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginBottom: 8,
+    minWidth: 88,
+    alignItems: 'center',
+  },
+  coverFollowBtnDefault: {
+    backgroundColor: '#ff8c00',
+  },
+  coverFollowBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.92)',
+  },
+  coverFollowBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  coverFollowBtnTextActive: {
+    color: '#666',
+  },
+  coverStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  coverStatText: {
+    color: '#fff',
+    fontSize: 12,
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  coverStatNum: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  coverStatDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+  },
+  coverAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
   list: { padding: 12, paddingBottom: 80 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { textAlign: 'center', color: theme.icon, marginTop: 60, fontSize: 14 },

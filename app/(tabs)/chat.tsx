@@ -7,6 +7,9 @@ import { userRemarkApi } from '@/api/userRemark';
 import RedPacketDetailModal from '@/components/RedPacketDetailModal';
 import RedPacketDialog from '@/components/RedPacketDialog';
 import RedPacketMessageCard from '@/components/RedPacketMessageCard';
+import OtherUserPetModal, { OtherPetTarget } from '@/components/pet/OtherUserPetModal';
+import UserDetailModal from '@/components/UserDetailModal';
+import UserInfoCard, { UserProfileSnapshot } from '@/components/UserInfoCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useUser } from '@/contexts/UserContext';
@@ -311,6 +314,20 @@ export default function ChatroomScreen() {
     userName: '',
     value: '',
   });
+
+  const [userInfoCard, setUserInfoCard] = useState<{
+    visible: boolean;
+    userId?: string | number | null;
+    userName?: string;
+    x: number;
+    y: number;
+  }>({ visible: false, userId: null, userName: '', x: 0, y: 0 });
+  const [userDetailModal, setUserDetailModal] = useState<{
+    visible: boolean;
+    user: UserProfileSnapshot | null;
+  }>({ visible: false, user: null });
+  const [otherPetTarget, setOtherPetTarget] = useState<OtherPetTarget | null>(null);
+  const [showOtherPetModal, setShowOtherPetModal] = useState(false);
 
   // 表情包选择器状态
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -1157,6 +1174,43 @@ export default function ChatroomScreen() {
     inputRef.current?.focus();
   };
 
+  const openUserInfoCard = (
+    userId?: string | number,
+    userName?: string,
+    pageX?: number,
+    pageY?: number,
+  ) => {
+    if (!userName && (userId == null || userId === '')) return;
+    dismissInputPopups();
+    closeMenus();
+    setUserInfoCard({
+      visible: true,
+      userId,
+      userName,
+      x: pageX ?? 40,
+      y: pageY ?? 120,
+    });
+  };
+
+  const closeUserInfoCard = () => {
+    setUserInfoCard({ visible: false, userId: null, userName: '', x: 0, y: 0 });
+  };
+
+  const openUserDetail = (user: UserProfileSnapshot) => {
+    closeUserInfoCard();
+    setUserDetailModal({ visible: true, user });
+  };
+
+  const handleViewUserProfile = (user: UserProfileSnapshot) => {
+    const userId = user.id ?? user.userId;
+    if (userId == null) {
+      toast.info('无法打开用户主页');
+      return;
+    }
+    setOtherPetTarget({ userId, userName: user.userName || user.userNickname });
+    setShowOtherPetModal(true);
+  };
+
   const handleViewRedPacketDetails = (item: ChatMessage) => {
     const redPacketInfo = parseRedPacketContent(item.content || item.md);
     if (redPacketInfo?.redPacketId) {
@@ -1304,7 +1358,14 @@ export default function ChatroomScreen() {
     return (
       <View style={[styles.messageRow, isSelf && styles.messageRowSelf]}>
         <Pressable
-          onPress={() => item.userName && handleAtUser(item.userName)}
+          onPress={(event) =>
+            openUserInfoCard(
+              item.userId,
+              item.userName,
+              event.nativeEvent.pageX,
+              event.nativeEvent.pageY,
+            )
+          }
           onLongPress={(event) =>
             handleAvatarLongPress(item, event.nativeEvent.pageX, event.nativeEvent.pageY)
           }
@@ -1327,9 +1388,20 @@ export default function ChatroomScreen() {
         >
           {/* 非自己的消息显示昵称 */}
           {!isSelf && (
-            <Text style={[styles.senderName, { color: isDark ? '#b0b0b0' : '#666' }]}>
-              {getUserDisplayName(item.userId, item.userName, item.userNickname)}
-            </Text>
+            <Pressable
+              onPress={(event) =>
+                openUserInfoCard(
+                  item.userId,
+                  item.userName,
+                  event.nativeEvent.pageX,
+                  event.nativeEvent.pageY,
+                )
+              }
+            >
+              <Text style={[styles.senderName, { color: isDark ? '#b0b0b0' : '#666' }]}>
+                {getUserDisplayName(item.userId, item.userName, item.userNickname)}
+              </Text>
+            </Pressable>
           )}
 
           {/* 引用消息 */}
@@ -1423,9 +1495,13 @@ export default function ChatroomScreen() {
                 <TouchableOpacity
                   style={styles.onlineUserItem}
                   onPress={() => {
-                    setInputText((prev) => `${prev}@${user.userName} `);
                     setShowOnlineUsers(false);
-                    inputRef.current?.focus();
+                    openUserInfoCard(
+                      (user as any).id ?? (user as any).userId,
+                      user.userName,
+                      200,
+                      80,
+                    );
                   }}
                 >
                   <Image
@@ -1726,6 +1802,39 @@ export default function ChatroomScreen() {
         senderName={selectedRedPacketSender?.name}
         senderAvatar={selectedRedPacketSender?.avatar}
         msg={selectedRedPacketSender?.msg}
+      />
+
+      {userInfoCard.visible && (
+        <Modal visible transparent animationType="fade" onRequestClose={closeUserInfoCard}>
+          <Pressable style={styles.userInfoOverlay} onPress={closeUserInfoCard}>
+            <UserInfoCard
+              visible
+              userId={userInfoCard.userId}
+              userName={userInfoCard.userName}
+              x={userInfoCard.x}
+              y={userInfoCard.y}
+              onClose={closeUserInfoCard}
+              onDetail={openUserDetail}
+              onMention={handleAtUser}
+            />
+          </Pressable>
+        </Modal>
+      )}
+
+      <UserDetailModal
+        visible={userDetailModal.visible}
+        user={userDetailModal.user}
+        onClose={() => setUserDetailModal({ visible: false, user: null })}
+        onViewProfile={handleViewUserProfile}
+      />
+
+      <OtherUserPetModal
+        visible={showOtherPetModal}
+        target={otherPetTarget}
+        onClose={() => {
+          setShowOtherPetModal(false);
+          setOtherPetTarget(null);
+        }}
       />
 
     </SafeAreaView>
@@ -2107,5 +2216,9 @@ const styles = StyleSheet.create({
   quotePreviewLabel: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  userInfoOverlay: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
 });

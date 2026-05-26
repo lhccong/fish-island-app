@@ -1,4 +1,4 @@
-export type PointsGameKey = 'stock' | 'tournament' | 'tower';
+export type PointsGameKey = 'stock' | 'tournament' | 'tower' | 'farm';
 
 export const POINTS_GAMES: {
   key: PointsGameKey;
@@ -35,5 +35,14 @@ export const POINTS_GAMES: {
     path: '/points/tower',
     accent: '#722ed1',
     bg: '#f9f0ff',
+  },
+  {
+    key: 'farm',
+    title: '摸鱼农场',
+    subtitle: '种下希望，收获积分',
+    icon: '🌾',
+    path: '/points/farm',
+    accent: '#52c41a',
+    bg: '#f6ffed',
   },
 ];

@@ -20,6 +20,14 @@ export default function PointsLayout() {
       <Stack.Screen name="stock" options={{ title: '摸鱼股市' }} />
       <Stack.Screen name="tournament" options={{ title: '武道大会' }} />
       <Stack.Screen name="tower" options={{ title: '无尽爬塔' }} />
+      <Stack.Screen
+        name="farm"
+        options={{
+          headerShown: false,
+          title: '摸鱼农场',
+          contentStyle: { backgroundColor: 'transparent' },
+        }}
+      />
     </Stack>
   );
 }

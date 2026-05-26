@@ -55,6 +55,7 @@ function RootLayoutNav() {
           />
           <Stack.Screen name="pet" options={{ headerShown: false }} />
           <Stack.Screen name="points" options={{ headerShown: false }} />
+          <Stack.Screen name="edit-profile" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
       </AuthGuard>
