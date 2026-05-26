@@ -1,4 +1,38 @@
+import type { UserInfo } from '@/api/user';
 import type { UserProfileSnapshot } from '@/components/UserInfoCard';
+
+/** 可用于 getUserVoById 的正整数用户 id */
+export function isValidLookupUserId(id: string | number | null | undefined): boolean {
+  if (id == null || id === '') return false;
+  const s = String(id).trim();
+  if (!/^\d+$/.test(s)) return false;
+  try {
+    return BigInt(s) > 0n;
+  } catch {
+    return false;
+  }
+}
+
+export function userInfoToProfileSnapshot(user: UserInfo): UserProfileSnapshot {
+  return {
+    id: user.id,
+    userId: user.id,
+    userName: user.userName,
+    userNickname: user.userNickname || user.userName,
+    userAvatar: user.userAvatar,
+    userAvatarURL: user.userAvatar,
+    level: user.level,
+    points: user.points ?? user.userPoint,
+    userPoint: user.userPoint ?? user.points,
+    vip: user.vip,
+    isVip: user.vip,
+    avatarFramerUrl: user.avatarFramerUrl,
+    followerCount: user.followerCount,
+    followingCount: user.followingUserCount,
+    isAdmin: user.userRole === 'admin',
+    userOnlineFlag: user.userOnlineFlag,
+  };
+}
 
 export function unwrapApiData<T = any>(raw: any): T | null {
   if (!raw) return null;

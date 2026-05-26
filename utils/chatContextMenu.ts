@@ -43,9 +43,14 @@ export const buildMessageContextMenuItems = (
 
   const isSelf = item.userName === currentUserName;
   const isImage = isImageHtml(content) || /\[img\]/i.test(content);
+  const viewCardItem: ContextMenuItem[] = isSelf
+    ? []
+    : [{ key: 'view-card', label: '查看详情', icon: 'person.text.rectangle' }];
 
   if (isImage) {
     return [
+      ...viewCardItem,
+      ...(viewCardItem.length ? [{ key: 'divider-view', label: '', divider: true }] : []),
       { key: 'quote', label: '引用', icon: 'quote.bubble.fill' },
       { key: 'add-emoji', label: '添加到表情', icon: 'face.smiling' },
       { key: 'copy-image', label: '复制', icon: 'doc.on.doc' },
@@ -65,6 +70,8 @@ export const buildMessageContextMenuItems = (
   }
 
   return [
+    ...viewCardItem,
+    ...(viewCardItem.length ? [{ key: 'divider-view', label: '', divider: true }] : []),
     { key: 'copy', label: '复制', icon: 'doc.on.doc' },
     { key: 'quote', label: '引用', icon: 'quote.bubble.fill' },
     ...(isSelf ? [] : [{ key: 'at', label: '@TA', icon: 'at' }]),
@@ -83,6 +90,8 @@ export const buildMessageContextMenuItems = (
 };
 
 export const buildUserContextMenuItems = (): ContextMenuItem[] => [
+  { key: 'view-card', label: '查看详情', icon: 'person.text.rectangle' },
+  { key: 'divider-0', label: '', divider: true },
   { key: 'at', label: '@TA', icon: 'at' },
   { key: 'divider-1', label: '', divider: true },
   { key: 'remark', label: '修改备注', icon: 'pencil' },

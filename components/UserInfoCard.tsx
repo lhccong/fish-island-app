@@ -1,6 +1,12 @@
 import { userApi } from '@/api/user';
 import { useUser } from '@/contexts/UserContext';
-import { mergeUserProfile, normalizeSeedUser, unwrapApiData } from '@/utils/normalizeUser';
+import {
+  isValidLookupUserId,
+  mergeUserProfile,
+  normalizeSeedUser,
+  unwrapApiData,
+  userInfoToProfileSnapshot,
+} from '@/utils/normalizeUser';
 import { pickUserAvatar, resolveAvatarUrl } from '@/utils/userAvatar';
 import { Image as ExpoImage } from 'expo-image';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -55,7 +61,7 @@ interface UserInfoCardProps {
   x?: number;
   y?: number;
   onClose: () => void;
-  /** 点击头像区域打开详情（无独立按钮） */
+  /** 打开完整用户详情页 */
   onDetail?: (user: UserProfileSnapshot) => void;
   onMention?: (userName: string) => void;
 }
@@ -95,7 +101,12 @@ export default function UserInfoCard({
 
   const position = useMemo(() => clampCardPosition(x, y), [x, y]);
 
-  const isCurrentUser = currentUser?.userName === userName;
+  const isCurrentUser =
+    Boolean(currentUser?.userName && userName && currentUser.userName === userName) ||
+    (currentUser?.id != null &&
+      userId != null &&
+      isValidLookupUserId(userId) &&
+      String(currentUser.id) === String(userId));
 
   useEffect(() => {
     if (!visible) {
@@ -108,13 +119,17 @@ export default function UserInfoCard({
     const fetchUserInfo = async () => {
       setLoading(true);
       try {
-        let data: Record<string, any> | null = null;
-        if (userId != null && userId !== '') {
-          const rawId = String(userId).trim();
-          if (rawId && /^\d+$/.test(rawId)) {
-            const res = await userApi.getUserVoById(rawId);
-            data = unwrapApiData(res);
+        if (isCurrentUser && currentUser) {
+          if (!cancelled) {
+            setUserInfo(normalizeSeedUser(userInfoToProfileSnapshot(currentUser)));
           }
+          return;
+        }
+
+        let data: Record<string, any> | null = null;
+        if (isValidLookupUserId(userId)) {
+          const res = await userApi.getUserVoById(String(userId).trim());
+          data = unwrapApiData(res);
         }
         if (!data && userName) {
           const res = await userApi.getUserProfile(userName);
@@ -135,7 +150,7 @@ export default function UserInfoCard({
     return () => {
       cancelled = true;
     };
-  }, [visible, userId, userName]);
+  }, [visible, userId, userName, isCurrentUser, currentUser]);
 
   if (!visible) return null;
 
@@ -166,12 +181,7 @@ export default function UserInfoCard({
           <ActivityIndicator style={styles.loader} color="#ffa940" />
         ) : userInfo ? (
           <>
-            <TouchableOpacity
-              style={styles.avatarSection}
-              activeOpacity={onDetail ? 0.7 : 1}
-              disabled={!onDetail}
-              onPress={() => onDetail?.(userInfo)}
-            >
+            <View style={styles.avatarSection}>
               <View style={styles.avatarWrap}>
                 <Image source={{ uri: avatarUrl }} style={styles.avatar} />
                 {userInfo.avatarFramerUrl ? (
@@ -196,7 +206,7 @@ export default function UserInfoCard({
                   <Text style={styles.statusText}>{isOnline ? '在线' : '离线'}</Text>
                 </View>
               </View>
-            </TouchableOpacity>
+            </View>
 
             {showMeta && (
               <View style={styles.metaRow}>
@@ -220,10 +230,18 @@ export default function UserInfoCard({
               </View>
             ) : null}
 
-            {!isCurrentUser && userInfo.userName && onMention ? (
-              <View style={styles.actions}>
+            <View style={styles.actions}>
+              {onDetail ? (
                 <TouchableOpacity
-                  style={[styles.actionBtn, styles.mentionBtn]}
+                  style={[styles.actionBtn, styles.detailBtn]}
+                  onPress={() => onDetail(userInfo)}
+                >
+                  <Text style={styles.detailBtnText}>查看详情</Text>
+                </TouchableOpacity>
+              ) : null}
+              {!isCurrentUser && userInfo.userName && onMention ? (
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.mentionBtn, !onDetail && styles.actionBtnFull]}
                   onPress={() => {
                     onMention(userInfo.userName!);
                     onClose();
@@ -231,8 +249,8 @@ export default function UserInfoCard({
                 >
                   <Text style={styles.mentionText}>@TA</Text>
                 </TouchableOpacity>
-              </View>
-            ) : null}
+              ) : null}
+            </View>
           </>
         ) : (
           <Text style={styles.empty}>加载失败</Text>
@@ -389,6 +407,19 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 999,
     alignItems: 'center',
+  },
+  actionBtnFull: {
+    flex: 1,
+  },
+  detailBtn: {
+    backgroundColor: 'rgba(24, 144, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(24, 144, 255, 0.35)',
+  },
+  detailBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1890ff',
   },
   mentionBtn: {
     backgroundColor: '#ff9f1a',

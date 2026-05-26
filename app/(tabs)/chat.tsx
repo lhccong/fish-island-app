@@ -1032,12 +1032,17 @@ export default function ChatroomScreen() {
 
   const handleMessageMenuAction = async (action: string) => {
     const item = msgMenu.message;
+    const menuX = msgMenu.x;
+    const menuY = msgMenu.y;
     closeMenus();
     if (!item) return;
 
     const content = item.content || item.md || '';
 
     switch (action) {
+      case 'view-card':
+        openUserInfoCard(item.userId, item.userName, menuX, menuY);
+        break;
       case 'quote':
         handleQuote(item);
         break;
@@ -1077,10 +1082,13 @@ export default function ChatroomScreen() {
   };
 
   const handleUserMenuAction = async (action: string) => {
-    const { userName, avatar, userId } = userMenu;
+    const { userName, avatar, userId, x: menuX, y: menuY } = userMenu;
     closeMenus();
 
     switch (action) {
+      case 'view-card':
+        openUserInfoCard(userId || undefined, userName, menuX, menuY);
+        break;
       case 'at':
         handleAtUser(userName);
         break;
@@ -1181,12 +1189,13 @@ export default function ChatroomScreen() {
     pageY?: number,
   ) => {
     if (!userName && (userId == null || userId === '')) return;
+    const isSelf = Boolean(userName && currentUser?.userName && userName === currentUser.userName);
     dismissInputPopups();
     closeMenus();
     setUserInfoCard({
       visible: true,
-      userId,
-      userName,
+      userId: isSelf && currentUser?.id != null ? currentUser.id : userId,
+      userName: isSelf ? currentUser?.userName : userName,
       x: pageX ?? 40,
       y: pageY ?? 120,
     });
@@ -1388,20 +1397,9 @@ export default function ChatroomScreen() {
         >
           {/* 非自己的消息显示昵称 */}
           {!isSelf && (
-            <Pressable
-              onPress={(event) =>
-                openUserInfoCard(
-                  item.userId,
-                  item.userName,
-                  event.nativeEvent.pageX,
-                  event.nativeEvent.pageY,
-                )
-              }
-            >
-              <Text style={[styles.senderName, { color: isDark ? '#b0b0b0' : '#666' }]}>
-                {getUserDisplayName(item.userId, item.userName, item.userNickname)}
-              </Text>
-            </Pressable>
+            <Text style={[styles.senderName, { color: isDark ? '#b0b0b0' : '#666' }]}>
+              {getUserDisplayName(item.userId, item.userName, item.userNickname)}
+            </Text>
           )}
 
           {/* 引用消息 */}
@@ -1508,9 +1506,12 @@ export default function ChatroomScreen() {
                     source={{ uri: user.userAvatarURL || 'https://api.yucoder.cn/images/default-avatar.png' }}
                     style={styles.onlineUserAvatar}
                   />
-                  <Text style={[styles.onlineUserName, { color: theme.text }]} numberOfLines={1}>
-                    {user.userNickname || user.userName}
-                  </Text>
+                  <View style={styles.onlineUserMeta}>
+                    <Text style={[styles.onlineUserName, { color: theme.text }]} numberOfLines={1}>
+                      {user.userNickname || user.userName}
+                    </Text>
+                    <Text style={[styles.onlineUserViewDetail, { color: theme.tint }]}>查看详情</Text>
+                  </View>
                 </TouchableOpacity>
               )}
             />
@@ -1986,9 +1987,17 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginRight: 8,
   },
+  onlineUserMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
   onlineUserName: {
     fontSize: 13,
-    flex: 1,
+  },
+  onlineUserViewDetail: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
   },
   messagesList: {
     paddingHorizontal: 12,
