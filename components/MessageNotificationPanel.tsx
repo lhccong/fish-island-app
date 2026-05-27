@@ -23,7 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const PAGE_SIZE = 10;
 
@@ -240,6 +240,7 @@ export default function MessageNotificationPanel({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaProvider>
       <SafeAreaView style={[s.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
         <View style={[s.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
           <View style={s.headerLeft}>
@@ -326,6 +327,7 @@ export default function MessageNotificationPanel({
           />
         )}
       </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }

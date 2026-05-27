@@ -2,6 +2,7 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import UserDetailModal from '@/components/UserDetailModal';
@@ -76,8 +77,9 @@ export default function ProfileScreen() {
   // 未登录状态
   if (!isLoggedIn) {
     return (
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top']}>
       <ScrollView
-        style={[styles.scrollView, { backgroundColor: theme.background }]}
+        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}>
         <View style={[styles.headerBg, { backgroundColor: theme.tint }]} />
         <View style={[styles.unauthCard, { backgroundColor: theme.card }]}>
@@ -95,12 +97,14 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </SafeAreaView>
     );
   }
 
   return (
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top']}>
     <ScrollView
-      style={[styles.scrollView, { backgroundColor: theme.background }]}
+      style={styles.scrollView}
       contentContainerStyle={styles.scrollContent}>
       {/* 顶部渐变背景 */}
       <View style={[styles.headerBg, { backgroundColor: theme.tint }]} />
@@ -283,10 +287,14 @@ export default function ProfileScreen() {
         onViewProfile={handleViewProfile}
       />
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+  },
   scrollView: {
     flex: 1,
   },
