@@ -106,13 +106,69 @@ export function isCropIconUrl(icon?: string): boolean {
 }
 
 /** 好友偷菜冷却剩余文案 */
-export function formatStealCooldown(cooldown?: string, now = Date.now()): string {
-  if (!cooldown) return '';
+export function formatStealCooldown(cooldown?: string | number, now = Date.now()): string {
+  if (cooldown == null || cooldown === '') return '';
+  if (typeof cooldown === 'number' && Number.isFinite(cooldown)) {
+    const ms = cooldown > 1e12 ? cooldown - now : cooldown;
+    if (ms <= 0) return '';
+    return formatCountdown(ms);
+  }
   const end = new Date(cooldown).getTime();
   if (Number.isNaN(end)) return '';
   const ms = end - now;
   if (ms <= 0) return '';
   return formatCountdown(ms);
+}
+
+/** 雪花 ID 等长整型：始终以字符串传递 */
+export function toUserIdString(id: string | number | undefined | null): string | undefined {
+  if (id == null || id === '') return undefined;
+  return typeof id === 'string' ? id : String(id);
+}
+
+/** 好友列表项上的用户 ID（与 frontend getFriendUserId 一致） */
+export function getFriendUserId(friend: FarmFriendListVO | Record<string, unknown>): string | undefined {
+  const raw = friend as Record<string, unknown>;
+  return toUserIdString((raw.friendId ?? raw.systemUserId) as string | number | undefined);
+}
+
+/** 拜访好友农场时地块是否可交互 */
+export function isFriendLandPlot(land: LandDTO | null | undefined): boolean {
+  if (!land) return false;
+  return land.locked !== 1;
+}
+
+/** 偷菜接口所需地块 ID */
+export function resolveStealLandId(land: LandDTO | null | undefined): number | null {
+  if (land?.id == null) return null;
+  const id = Number(land.id);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+/** 好友农场：成熟、有地块 ID 且 canSteal===true */
+export function canStealOnFriendLand(land: LandDTO, currentNow: number): boolean {
+  return (
+    isFriendLandPlot(land) &&
+    isLandMature(land, currentNow) &&
+    resolveStealLandId(land) != null &&
+    land.canSteal === true
+  );
+}
+
+/** 汇总批量偷菜返回的积分 */
+export function sumStealCoinGained(records?: { coinGained?: number }[]): number {
+  return (records ?? []).reduce((sum, record) => sum + (record.coinGained ?? 0), 0);
+}
+
+export function unwrapFarmFriendList(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[];
+  if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>;
+    if (Array.isArray(obj.records)) return obj.records as Record<string, unknown>[];
+    if (Array.isArray(obj.list)) return obj.list as Record<string, unknown>[];
+    if (Array.isArray(obj.items)) return obj.items as Record<string, unknown>[];
+  }
+  return [];
 }
 
 export function formatStolenTime(time?: string): string {
@@ -126,59 +182,77 @@ export function formatStolenTime(time?: string): string {
   return `${mm}-${dd} ${hh}:${mi}`;
 }
 
-type FriendUserIdSource = {
-  friendUserId?: number | string;
-  userId?: number | string;
-  systemUserId?: number | string;
-  id?: number | string;
-  /** 列表里的 friendId 多为关系序号，不能当作 friendUserId */
-  friendId?: number | string;
-};
-
-/** 拜访接口需要的用户 ID（friendUserId），优先真实用户字段 */
-export function resolveFriendUserId(friend: FriendUserIdSource): number | string | null {
-  const raw =
-    friend.friendUserId ??
-    friend.userId ??
-    friend.systemUserId ??
-    friend.id ??
-    friend.friendId;
-  if (raw == null || raw === '') return null;
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    return /^\d+$/.test(trimmed) ? trimmed : null;
-  }
-  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
-  return null;
+/** 拜访接口 friendUserId（字符串） */
+export function resolveFriendUserId(
+  friend: FarmFriendListVO | Record<string, unknown>,
+): string | null {
+  const id = getFriendUserId(friend);
+  return id ?? null;
 }
 
-/** @deprecated 使用 resolveFriendUserId */
+/** @deprecated 使用 getFriendUserId */
 export const resolveFarmFriendId = resolveFriendUserId;
 
 export function normalizeFarmFriend(raw: Record<string, unknown>): FarmFriendListVO {
-  const friendUserId = resolveFriendUserId({
-    friendUserId: raw.friendUserId as number | string | undefined,
-    userId: raw.userId as number | string | undefined,
-    systemUserId: raw.systemUserId as number | string | undefined,
-    id: raw.id as number | string | undefined,
-    friendId: raw.friendId as number | string | undefined,
-  });
+  if (!raw || typeof raw !== 'object') {
+    return {
+      nickname: '好友',
+      level: 1,
+      canSteal: false,
+      stealCooldown: undefined,
+    };
+  }
+
+  const stealCooldown =
+    (raw.stealCooldown ??
+      raw.stealCoolDown ??
+      raw.steal_cooldown ??
+      raw.cooldownEndTime ??
+      raw.nextStealTime ??
+      raw.stealCooldownEnd) as string | undefined;
+
   return {
-    friendUserId: friendUserId ?? undefined,
-    userId: friendUserId ?? undefined,
-    systemUserId: friendUserId ?? undefined,
-    nickname: String(raw.nickname ?? raw.userName ?? raw.nickName ?? '好友'),
-    avatar: (raw.avatar ?? raw.userAvatar) as string | undefined,
-    level: Number(raw.level) || 1,
-    canSteal: Boolean(raw.canSteal),
-    stealCooldown: raw.stealCooldown as string | undefined,
+    friendId: (raw.friendId ?? raw.friend_id) as number | string | undefined,
+    systemUserId: (raw.systemUserId ?? raw.system_user_id) as number | string | undefined,
+    nickname: String(
+      raw.nickname ?? raw.userName ?? raw.nickName ?? raw.friendName ?? '好友',
+    ),
+    avatar: (raw.avatar ?? raw.userAvatar ?? raw.friendAvatar) as string | undefined,
+    level: Number(raw.level ?? raw.farmLevel ?? raw.userLevel) || 1,
+    canSteal: raw.canSteal === true,
+    stealCooldown,
+  };
+}
+
+function unwrapLandRaw(raw: Record<string, unknown> | LandDTO | null | undefined): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const nested = obj.landDTO ?? obj.landDto ?? obj.land;
+  if (nested && typeof nested === 'object') return nested as Record<string, unknown>;
+  return obj;
+}
+
+export function normalizeLand(raw: Record<string, unknown>): LandDTO {
+  const source = unwrapLandRaw(raw);
+  if (!source) return raw as LandDTO;
+  return {
+    ...(source as LandDTO),
+    cropName: (source.cropName ?? source.crop_name) as string | undefined,
+    harvestTime: (source.harvestTime ?? source.harvest_time) as string | undefined,
+    plantedTime: (source.plantedTime ?? source.planted_time) as string | undefined,
+    plantedCropId: (source.plantedCropId ?? source.planted_crop_id) as number | undefined,
+    landIndex: (source.landIndex ?? source.land_index) as number | undefined,
   };
 }
 
 export function parseFriendLandsPayload(data: unknown): LandDTO[] {
-  if (Array.isArray(data)) return data;
-  if (data && typeof data === 'object' && Array.isArray((data as { lands?: LandDTO[] }).lands)) {
-    return (data as { lands: LandDTO[] }).lands;
+  if (Array.isArray(data)) {
+    return (data as Record<string, unknown>[]).map((land) => normalizeLand(land));
+  }
+  if (data && typeof data === 'object' && Array.isArray((data as { lands?: unknown }).lands)) {
+    return ((data as { lands: Record<string, unknown>[] }).lands).map((land) =>
+      normalizeLand(land),
+    );
   }
   return [];
 }

@@ -1,12 +1,12 @@
-import type { FarmFriendFarmVO, FarmFriendListVO, FarmStealRecordVO } from '@/api/farm';
+import type { FarmFriendListVO, FarmStealRecordVO } from '@/api/farm';
 import { farmApi } from '@/api/farm';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import {
   formatStealCooldown,
   formatStolenTime,
+  getFriendUserId,
   normalizeFarmFriend,
-  parseFriendLandsPayload,
-  resolveFriendUserId,
+  unwrapFarmFriendList,
 } from '@/utils/farmUtils';
 import { resolveAvatarUrl } from '@/utils/userAvatar';
 import { toast } from '@/utils/toast';
@@ -56,7 +56,8 @@ interface FarmFriendsModalProps {
   myAvatar?: string;
   onClose: () => void;
   onRefreshStolen: () => void;
-  onVisitFriend: (farmData: FarmFriendFarmVO) => void;
+  visitLoadingId?: string | null;
+  onVisitFriend: (friend: FarmFriendListVO) => void | Promise<void>;
 }
 
 export default function FarmFriendsModal({
@@ -69,6 +70,7 @@ export default function FarmFriendsModal({
   myAvatar,
   onClose,
   onRefreshStolen,
+  visitLoadingId = null,
   onVisitFriend,
 }: FarmFriendsModalProps) {
   const { height: windowHeight } = useWindowDimensions();
@@ -79,16 +81,15 @@ export default function FarmFriendsModal({
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('steal');
   const [sortOpen, setSortOpen] = useState(false);
-  const [visitingId, setVisitingId] = useState<number | string | null>(null);
-
   const stolenCount = stolenRecords.length;
 
   const loadFriends = useCallback(async () => {
     setFriendsLoading(true);
     try {
       const res = await farmApi.getFriendList();
-      if (res.code === 0 && res.data) {
-        setFriends(res.data.map((item) => normalizeFarmFriend(item as Record<string, unknown>)));
+      const list = unwrapFarmFriendList(res.data);
+      if (res.code === 0) {
+        setFriends(list.map((item) => normalizeFarmFriend(item)));
       } else {
         toast.error(res.msg || res.message || '加载好友列表失败');
       }
@@ -108,7 +109,6 @@ export default function FarmFriendsModal({
       setActiveTab('play');
       setSearch('');
       setSortOpen(false);
-      setVisitingId(null);
     }
   }, [visible, initialTab, onRefreshStolen, loadFriends]);
 
@@ -137,30 +137,11 @@ export default function FarmFriendsModal({
   }, [friends, search, sortKey]);
 
   const handleVisit = async (friend: FarmFriendListVO) => {
-    const friendUserId = resolveFriendUserId(friend);
-    if (friendUserId == null) {
-      toast.error('好友信息无效');
+    if (getFriendUserId(friend) == null) {
+      toast.info('好友信息异常');
       return;
     }
-    setVisitingId(friendUserId);
-    try {
-      const res = await farmApi.getFriendLands(friendUserId);
-      if (res.code === 0 && res.data != null) {
-        onClose();
-        onVisitFriend({
-          friendUserId,
-          friendName: friend.nickname,
-          friendAvatar: friend.avatar,
-          lands: parseFriendLandsPayload(res.data),
-        });
-      } else {
-        toast.error(res.msg || res.message || '拜访失败');
-      }
-    } catch {
-      toast.error('拜访失败');
-    } finally {
-      setVisitingId(null);
-    }
+    await onVisitFriend(friend);
   };
 
   const renderPlayContent = () => (
@@ -217,7 +198,7 @@ export default function FarmFriendsModal({
           </Text>
         ) : (
           filteredFriends.map((friend, index) => {
-            const fid = resolveFriendUserId(friend);
+            const fid = getFriendUserId(friend);
             const cooldown = formatStealCooldown(friend.stealCooldown);
             return (
               <View key={String(fid ?? index)} style={styles.friendItem}>
@@ -232,7 +213,7 @@ export default function FarmFriendsModal({
                   </Text>
                   <View style={styles.friendMeta}>
                     <Text style={styles.friendLevel}>Lv.{friend.level ?? 1}</Text>
-                    {friend.canSteal ? (
+                    {friend.canSteal === true && !cooldown ? (
                       <Text style={styles.canStealIcon}>🥬</Text>
                     ) : cooldown ? (
                       <Text style={styles.cooldownText}>冷却 {cooldown}</Text>
@@ -242,12 +223,12 @@ export default function FarmFriendsModal({
                   </View>
                 </View>
                 <TouchableOpacity
-                  style={[styles.visitBtn, visitingId === fid && styles.visitBtnDisabled]}
-                  disabled={visitingId === fid}
+                  style={[styles.visitBtn, visitLoadingId === fid && styles.visitBtnDisabled]}
+                  disabled={visitLoadingId === fid}
                   onPress={() => handleVisit(friend)}
                 >
                   <Text style={styles.visitBtnText}>
-                    {visitingId === fid ? '…' : '拜访'}
+                    {visitLoadingId === fid ? '拜访中' : '拜访'}
                   </Text>
                 </TouchableOpacity>
               </View>

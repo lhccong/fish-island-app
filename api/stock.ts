@@ -10,6 +10,10 @@ export const stockApi = {
     return request.get('/api/index/trade/position');
   },
 
+  getPositions() {
+    return request.get('/api/index/trade/positions');
+  },
+
   buy(body: { indexCode: string; amount: number }) {
     return request.post('/api/index/trade/buy', body);
   },

@@ -1,7 +1,6 @@
 import {
   CropDTO,
   farmApi,
-  FarmFriendFarmVO,
   FarmFriendListVO,
   FarmStealRecordVO,
   FarmUserVO,
@@ -29,13 +28,18 @@ import {
   formatCountdown,
   GRID_COLS,
   GRID_ROWS,
+  canStealOnFriendLand,
+  getFriendUserId,
+  isFriendLandPlot,
   isLandEmpty,
   isLandMature,
   isLandUnlocked,
   LAND_STATUS,
   mergeLandUpdates,
   parseFriendLandsPayload,
+  resolveStealLandId,
   resolveFriendUserId,
+  sumStealCoinGained,
   toLandIndex,
   TOTAL_LANDS,
 } from '@/utils/farmUtils';
@@ -89,6 +93,8 @@ export default function FarmPanel() {
   const [friendsTab, setFriendsTab] = useState<'play' | 'visitor'>('play');
 
   const [visitTarget, setVisitTarget] = useState<FarmFriendListVO | null>(null);
+  const [visitingFriendUserId, setVisitingFriendUserId] = useState<string | null>(null);
+  const [visitLoadingId, setVisitLoadingId] = useState<string | null>(null);
   const [friendFarm, setFriendFarm] = useState<{ name: string; avatar?: string } | null>(null);
   const [friendLands, setFriendLands] = useState<LandDTO[]>([]);
   const [friendFarmLoading, setFriendFarmLoading] = useState(false);
@@ -119,6 +125,12 @@ export default function FarmPanel() {
   const matureLands = useMemo(
     () => lands.filter((l) => isLandMature(l, now) && l.id != null && isLandUnlocked(l)),
     [lands, now],
+  );
+
+  const stealableLands = useMemo(
+    () =>
+      isVisitingFriend ? friendLands.filter((l) => canStealOnFriendLand(l, now)) : [],
+    [friendLands, now, isVisitingFriend],
   );
 
   const nearestGrowingMs = useMemo(() => {
@@ -339,61 +351,90 @@ export default function FarmPanel() {
     if (tab === 'visitor') loadStolenRecords();
   };
 
-  const enterFriendFarm = useCallback((farmData: FarmFriendFarmVO) => {
-    const friendUserId = resolveFriendUserId(farmData);
-    setFriendLands(farmData.lands ?? []);
-    setFriendFarm({
-      name: farmData.friendName ?? '好友',
-      avatar: farmData.friendAvatar,
-    });
-    setVisitTarget({
-      friendUserId: friendUserId ?? undefined,
-      nickname: farmData.friendName,
-      avatar: farmData.friendAvatar,
-    });
+  const enterFriendFarm = useCallback(
+    (friend: FarmFriendListVO, friendLandsData: LandDTO[]) => {
+      const friendUserId = getFriendUserId(friend);
+      setVisitingFriendUserId(friendUserId ?? null);
+      setFriendLands(friendLandsData);
+      setFriendFarm({
+        name: friend.nickname ?? '好友',
+        avatar: friend.avatar,
+      });
+      setVisitTarget(friend);
+    },
+    [],
+  );
+
+  const loadFriendLands = useCallback(async (friendUserId: string) => {
+    const data = await farmApi.loadFriendLands(friendUserId);
+    setFriendLands(data);
   }, []);
 
-  const loadFriendFarm = useCallback(async (friend: FarmFriendListVO) => {
-    const friendUserId = resolveFriendUserId(friend);
-    if (friendUserId == null) return;
-    setFriendFarmLoading(true);
-    try {
-      const res = await farmApi.getFriendLands(friendUserId);
-      if (res.code === 0 && res.data != null) {
-        enterFriendFarm({
-          friendUserId,
-          friendName: friend.nickname ?? '好友',
-          friendAvatar: friend.avatar,
-          lands: parseFriendLandsPayload(res.data),
-        });
-      } else {
-        toast.error(res.msg || res.message || '访问好友农场失败');
+  const visitFarmByUserId = useCallback(
+    async (friend: FarmFriendListVO) => {
+      const friendUserId = getFriendUserId(friend);
+      if (friendUserId == null) return false;
+      setVisitLoadingId(friendUserId);
+      setFriendFarmLoading(true);
+      try {
+        const data = await farmApi.loadFriendLands(friendUserId);
+        enterFriendFarm(friend, data);
+        toast.success(`正在拜访 ${friend.nickname || '好友'} 的农场`);
+        return true;
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : '访问好友农场失败';
+        toast.error(errMsg);
+        return false;
+      } finally {
+        setVisitLoadingId(null);
+        setFriendFarmLoading(false);
       }
-    } catch {
-      toast.error('访问好友农场失败');
-    } finally {
-      setFriendFarmLoading(false);
-    }
-  }, [enterFriendFarm]);
+    },
+    [enterFriendFarm],
+  );
+
+  const refreshFriendFarm = useCallback(
+    async (friend: FarmFriendListVO) => {
+      const friendUserId = getFriendUserId(friend);
+      if (friendUserId == null) return;
+      setFriendFarmLoading(true);
+      try {
+        await loadFriendLands(friendUserId);
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : '刷新好友农场失败';
+        toast.error(errMsg);
+      } finally {
+        setFriendFarmLoading(false);
+      }
+    },
+    [loadFriendLands],
+  );
 
   const exitFriendFarm = useCallback(() => {
     setVisitTarget(null);
+    setVisitingFriendUserId(null);
     setFriendFarm(null);
     setFriendLands([]);
   }, []);
 
-  const handleSteal = async (plantRecordId: number) => {
+  const handleSteal = async (land: LandDTO) => {
+    if (!visitTarget) return;
+    const landId = resolveStealLandId(land);
+    if (landId == null) {
+      toast.info('该地块暂不可偷');
+      return;
+    }
+
     setActionLoading(true);
     try {
-      const res = await farmApi.steal(plantRecordId);
+      const res = await farmApi.steal({ landId });
       if (res.code === 0) {
-        const gained = res.data?.coinGained;
-        toast.success(
-          gained != null && gained > 0 ? `偷菜成功，+${gained} 积分` : '偷菜成功～',
-        );
-        if (visitTarget) {
-          await loadFriendFarm(visitTarget);
+        const coin = sumStealCoinGained(res.data);
+        toast.success(coin > 0 ? `偷菜成功，获得 ${coin} 积分～` : '偷菜成功～');
+        if (visitingFriendUserId) {
+          await loadFriendLands(visitingFriendUserId);
         }
+        await loadStolenRecords();
         await refreshUserInfo();
       } else {
         toast.error(res.msg || res.message || '偷菜失败');
@@ -405,38 +446,84 @@ export default function FarmPanel() {
     }
   };
 
-  const handleFriendPlotPress = (land: LandDTO | null, arrayIndex: number) => {
-    if (!land?.id) {
-      toast.info('这块地还没有作物');
+  const handleStealAll = async () => {
+    if (!visitTarget || stealableLands.length === 0) {
+      toast.info('暂无可偷的成熟作物');
       return;
     }
-    if (!isLandUnlocked(land)) {
-      toast.info('这块地尚未开垦');
+    const landIds = stealableLands
+      .map((land) => resolveStealLandId(land))
+      .filter((id): id is number => id != null);
+    if (landIds.length === 0) {
+      toast.info('暂无可偷的成熟作物');
       return;
     }
-    if (isLandMature(land, now)) {
-      if (land.canSteal && land.plantRecordId != null) {
-        handleSteal(land.plantRecordId);
+
+    setActionLoading(true);
+    try {
+      const res = await farmApi.steal({ landIds });
+      if (res.code === 0 && (res.data?.length ?? 0) > 0) {
+        const count = res.data!.length;
+        const coin = sumStealCoinGained(res.data);
+        toast.success(
+          coin > 0
+            ? `成功偷取 ${count} 块地，获得 ${coin} 积分～`
+            : `成功偷取 ${count} 块地的作物～`,
+        );
+        if (visitingFriendUserId) {
+          await loadFriendLands(visitingFriendUserId);
+        }
+        await loadStolenRecords();
+        await refreshUserInfo();
+      } else {
+        toast.error(res.msg || res.message || '偷菜失败');
+      }
+    } catch {
+      toast.error('偷菜失败');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleFriendPlotPress = (land: LandDTO | null) => {
+    if (!isFriendLandPlot(land)) return;
+    if (isLandMature(land!, now)) {
+      if (resolveStealLandId(land!) == null) {
+        toast.info('地块信息异常，请刷新好友农场后重试');
         return;
       }
-      toast.info(land.canSteal === false ? '这块菜暂时偷不了' : '作物已被收获或偷走');
+      handleSteal(land!);
       return;
     }
-    if (land.status === LAND_STATUS.GROWING) {
-      const remain = land.harvestTime
-        ? new Date(land.harvestTime).getTime() - now
+    if (land!.status === LAND_STATUS.GROWING) {
+      const remain = land!.harvestTime
+        ? new Date(land!.harvestTime).getTime() - now
         : 0;
       toast.info(
-        `${land.cropName || getCrop(land)?.name || '作物'}生长中，剩余 ${formatCountdown(remain)}`,
+        `${land!.cropName || getCrop(land!)?.name || '作物'}还在生长，${formatCountdown(remain)} 后成熟`,
       );
       return;
     }
-    toast.info('好友这块地是空的');
+    toast.info('好友的地块是空的');
   };
 
-  const onPlotPress = isVisitingFriend ? handleFriendPlotPress : handlePlotPress;
+  const onPlotPress = (land: LandDTO | null, arrayIndex: number) => {
+    if (isVisitingFriend) {
+      handleFriendPlotPress(land);
+    } else {
+      handlePlotPress(land, arrayIndex);
+    }
+  };
 
   const handleDockMature = () => {
+    if (isVisitingFriend) {
+      if (stealableLands.length > 0) {
+        handleStealAll();
+        return;
+      }
+      toast.info('暂无可偷的成熟作物');
+      return;
+    }
     if (matureLands.length > 0) {
       handleHarvest(matureLands.map((l) => l.id!).filter(Boolean));
       return;
@@ -511,6 +598,24 @@ export default function FarmPanel() {
           </View>
 
           <View style={styles.headerAside}>
+            {!isVisitingFriend && matureLands.length > 0 ? (
+              <TouchableOpacity
+                style={styles.harvestAllBtn}
+                disabled={actionLoading}
+                onPress={() => handleHarvest(matureLands.map((l) => l.id!).filter(Boolean))}
+              >
+                <Text style={styles.harvestAllBtnText}>摘取</Text>
+              </TouchableOpacity>
+            ) : null}
+            {isVisitingFriend && stealableLands.length > 0 ? (
+              <TouchableOpacity
+                style={styles.stealAllBtn}
+                disabled={actionLoading}
+                onPress={handleStealAll}
+              >
+                <Text style={styles.stealAllBtnText}>偷菜</Text>
+              </TouchableOpacity>
+            ) : null}
             {!isVisitingFriend && emptyLands.length > 0 ? (
               <TouchableOpacity
                 style={styles.plantAllBtn}
@@ -525,7 +630,7 @@ export default function FarmPanel() {
               disabled={isVisitingFriend ? friendFarmLoading : loading}
               onPress={
                 isVisitingFriend
-                  ? () => visitTarget && loadFriendFarm(visitTarget)
+                  ? () => visitTarget && refreshFriendFarm(visitTarget)
                   : loadFarmData
               }
             >
@@ -548,7 +653,7 @@ export default function FarmPanel() {
             onRefresh={() => {
               setRefreshing(true);
               if (isVisitingFriend && visitTarget) {
-                loadFriendFarm(visitTarget).finally(() => setRefreshing(false));
+                refreshFriendFarm(visitTarget).finally(() => setRefreshing(false));
               } else {
                 loadFarmData();
               }
@@ -661,6 +766,20 @@ export default function FarmPanel() {
                 <Text style={styles.quickHarvestLabel}>一键摘取</Text>
               </TouchableOpacity>
             )}
+            {isVisitingFriend && stealableLands.length > 0 && (
+              <TouchableOpacity
+                style={styles.quickHarvest}
+                disabled={actionLoading}
+                onPress={handleStealAll}
+              >
+                <Image
+                  source={{ uri: FARM_HARVEST_ICON }}
+                  style={styles.quickHarvestIcon}
+                  contentFit="contain"
+                />
+                <Text style={[styles.quickHarvestLabel, styles.quickStealLabel]}>一键偷菜</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </ScrollView>
@@ -697,7 +816,11 @@ export default function FarmPanel() {
         myAvatar={farmUser?.userAvatar ?? userInfo?.userAvatar}
         onClose={() => setFriendsVisible(false)}
         onRefreshStolen={loadStolenRecords}
-        onVisitFriend={enterFriendFarm}
+        visitLoadingId={visitLoadingId}
+        onVisitFriend={async (friend) => {
+          const ok = await visitFarmByUserId(friend);
+          if (ok) setFriendsVisible(false);
+        }}
       />
     </FarmSkyBackground>
     </SafeAreaView>
@@ -769,6 +892,34 @@ const styles = StyleSheet.create({
     backgroundColor: '#52c41a',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  harvestAllBtn: {
+    minWidth: 52,
+    height: 36,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#52c41a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  harvestAllBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  stealAllBtn: {
+    minWidth: 52,
+    height: 36,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#fa8c16',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stealAllBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
   },
   refreshBtn: {
     width: 36,
@@ -953,5 +1104,9 @@ const styles = StyleSheet.create({
     textShadowColor: '#6b4423',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+  },
+  quickStealLabel: {
+    color: '#fff7e6',
+    textShadowColor: '#ad4e00',
   },
 });

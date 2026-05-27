@@ -1,4 +1,5 @@
 import { ApiResponse } from '@/api/user';
+import { parseFriendLandsPayload } from '@/utils/farmUtils';
 import { request } from '@/utils/request';
 
 export interface FarmUserVO {
@@ -8,6 +9,7 @@ export interface FarmUserVO {
   level?: number;
   totalHarvest?: number;
   friendCount?: number;
+  experience?: number;
 }
 
 export interface LandDTO {
@@ -19,7 +21,6 @@ export interface LandDTO {
   cropName?: string;
   harvestTime?: string;
   plantedTime?: string;
-  plantRecordId?: number;
   canSteal?: boolean;
 }
 
@@ -50,16 +51,16 @@ export interface FarmStealRecord {
   id?: number;
   coinGained?: number;
   cropId?: number;
+  landId?: number;
+  ownerId?: number;
   plantRecordId?: number;
   stealerId?: number;
   stolenTime?: string;
 }
 
-/** 互关好友列表项 */
+/** 互关好友列表项（与 frontend FarmFriendListVO 一致） */
 export interface FarmFriendListVO {
-  /** 好友用户 ID，拜访接口 friendUserId */
-  friendUserId?: number | string;
-  userId?: number | string;
+  friendId?: number | string;
   systemUserId?: number | string;
   nickname?: string;
   avatar?: string;
@@ -79,6 +80,11 @@ export interface FarmFriendFarmVO {
 export interface PlantItem {
   landId: number;
   cropId: number;
+}
+
+export interface StealRequest {
+  landId?: number;
+  landIds?: number[];
 }
 
 export const farmApi = {
@@ -106,20 +112,30 @@ export const farmApi = {
     return request.get('/api/steal/my-stolen');
   },
 
-  /** 互关好友农场列表（含偷菜状态） */
+  /** 互关好友农场列表 GET /api/farm/friend/list */
   getFriendList(): Promise<ApiResponse<FarmFriendListVO[]>> {
     return request.get('/api/farm/friend/list');
   },
 
-  /** 获取好友农场地块 GET /api/farm/friend/lands?friendUserId= */
+  /** 好友地块列表 GET /api/farm/friend/lands */
   getFriendLands(friendUserId: number | string): Promise<ApiResponse<LandDTO[]>> {
     return request.get('/api/farm/friend/lands', {
       friendUserId: String(friendUserId),
     });
   },
 
-  /** 偷菜 */
-  steal(plantRecordId: number): Promise<ApiResponse<FarmStealRecord>> {
-    return request.post('/api/steal', { plantRecordId });
+  /** 偷菜（单块 landId 或批量 landIds）POST /api/steal */
+  steal(body: StealRequest): Promise<ApiResponse<FarmStealRecord[]>> {
+    return request.post('/api/steal', body, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  },
+
+  async loadFriendLands(friendUserId: number | string): Promise<LandDTO[]> {
+    const res = await this.getFriendLands(friendUserId);
+    if (res.code === 0 && res.data != null) {
+      return parseFriendLandsPayload(res.data);
+    }
+    throw new Error(res.msg || res.message || '加载好友农场失败');
   },
 };
