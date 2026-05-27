@@ -1,3 +1,4 @@
+import { BASE_URL } from '@/constants/api';
 import { request } from '@/utils/request';
 
 // 用户信息类型
@@ -28,6 +29,7 @@ export interface UserInfo {
   userIntro?: string;
   followingUserCount?: number;
   followerCount?: number;
+  momentsBgUrl?: string;
   // 认证信息
   tokenName?: string;
   tokenValue?: string;
@@ -52,6 +54,18 @@ export interface ApiResponse<T = any> {
   data?: T;
   message?: string;
   msg?: string;
+}
+
+export interface UserUpdateMyRequest {
+  userName?: string;
+  userProfile?: string;
+  userAvatar?: string;
+  momentsBgUrl?: string;
+}
+
+export interface UserTitleVO {
+  titleId: number;
+  name?: string;
 }
 
 export const userApi = {
@@ -159,9 +173,24 @@ export const userApi = {
     return request.get('/api/user/get/vo', { id: normalizedId });
   },
 
-  // 更新用户资料
-  async updateUserProfile(data: any): Promise<ApiResponse> {
-    return request.put('/api/user', data);
+  /** 更新当前登录用户个人信息 POST /api/user/update/my */
+  async updateMyProfile(data: UserUpdateMyRequest): Promise<ApiResponse<boolean>> {
+    return request.post('/api/user/update/my', data);
+  },
+
+  /** @deprecated 请使用 updateMyProfile */
+  async updateUserProfile(data: UserUpdateMyRequest): Promise<ApiResponse<boolean>> {
+    return this.updateMyProfile(data);
+  },
+
+  /** 获取可用称号列表 GET /api/user/title/list */
+  async listAvailableTitles(): Promise<ApiResponse<UserTitleVO[]>> {
+    return request.get('/api/user/title/list');
+  },
+
+  /** 设置当前佩戴称号 POST /api/user/title/set?titleId= */
+  async setCurrentTitle(titleId: number | string): Promise<ApiResponse<boolean>> {
+    return request.post('/api/user/title/set', {}, { params: { titleId } });
   },
 
   // 获取活跃度
@@ -242,41 +271,39 @@ export const userApi = {
   },
 
   /**
-   * 上传图片
-   * @param uri - 图片本地URI
-   * @param fileName - 文件名
+   * 上传图片到 MinIO（与 Web 端一致）
+   * @param biz user_file 通用 | user_post 鱼小圈动态/评论配图
    */
-  async uploadImage(uri: string, fileName: string): Promise<ApiResponse<string>> {
-    const formData = new FormData();
-
-    // 根据文件扩展名推断 MIME 类型
+  async uploadMinioImage(
+    uri: string,
+    fileName: string,
+    biz: 'user_file' | 'user_post' = 'user_file',
+    mimeType?: string,
+  ): Promise<ApiResponse<string>> {
     const ext = fileName.split('.').pop()?.toLowerCase();
     const mimeMap: Record<string, string> = {
       png: 'image/png',
       gif: 'image/gif',
       webp: 'image/webp',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      heic: 'image/jpeg',
     };
-    const fileType = mimeMap[ext ?? ''] ?? 'image/jpeg';
+    const fileType = mimeType || mimeMap[ext ?? ''] || 'image/jpeg';
 
-    // React Native 特定的文件对象格式
+    const formData = new FormData();
     formData.append('file', { uri, type: fileType, name: fileName } as any);
 
-    // 获取认证信息
     const tokenName = await request.getTokenName();
     const tokenValue = await request.getTokenValue();
     const apiKey = await request.getApiKey();
 
-    // 构建请求头（不手动设置 Content-Type，让 fetch 自动附加 boundary）
     const headers: Record<string, string> = {};
-
-    // 构建 URL
-    let url = 'https://api.yucoder.cn/api/file/minio/upload?biz=user_file';
+    let url = `${BASE_URL}/api/file/minio/upload?biz=${biz}`;
 
     if (tokenName && tokenValue) {
-      // 优先使用 token 认证
       headers[tokenName] = tokenValue;
     } else if (apiKey) {
-      // 回退到 apiKey
       url += `&apiKey=${apiKey}`;
     }
 
@@ -290,7 +317,25 @@ export const userApi = {
       throw new Error(`上传失败: ${response.status}`);
     }
 
-    return await response.json();
+    const json = (await response.json()) as ApiResponse<string>;
+    if (json.code !== 0 || !json.data) {
+      throw new Error(json.message || json.msg || '上传失败');
+    }
+    return json;
+  },
+
+  /** 聊天/表情包等通用图片 */
+  async uploadImage(uri: string, fileName: string, mimeType?: string): Promise<ApiResponse<string>> {
+    return this.uploadMinioImage(uri, fileName, 'user_file', mimeType);
+  },
+
+  /** 鱼小圈动态配图（biz=user_post，与 Web/utools 一致） */
+  async uploadPostImage(
+    uri: string,
+    fileName: string,
+    mimeType?: string,
+  ): Promise<ApiResponse<string>> {
+    return this.uploadMinioImage(uri, fileName, 'user_post', mimeType);
   },
 
   /**

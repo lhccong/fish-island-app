@@ -1,7 +1,6 @@
 import type { Moment } from '@/api/moments';
-import { BASE_URL } from '@/constants/api';
+import { userApi } from '@/api/user';
 import { Colors } from '@/constants/theme';
-import { request } from '@/utils/request';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import {
@@ -20,36 +19,30 @@ import {
   View,
 } from 'react-native';
 
+type LocalImage = {
+  uri: string;
+  fileName: string;
+  mimeType: string;
+};
+
 function isRemoteImageUri(uri: string): boolean {
   return uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('/');
 }
 
-async function uploadImageUri(uri: string): Promise<string | null> {
-  if (isRemoteImageUri(uri)) return uri;
-  try {
-    const fileName = uri.split('/').pop() || 'image.jpg';
-    const tokenName = await request.getTokenName();
-    const tokenValue = await request.getTokenValue();
-    const apiKey = await request.getApiKey();
-    const ext = fileName.split('.').pop()?.toLowerCase() || 'jpg';
-    const mimeMap: Record<string, string> = {
-      png: 'image/png',
-      gif: 'image/gif',
-      webp: 'image/webp',
-    };
-    const formData = new FormData();
-    formData.append('file', { uri, type: mimeMap[ext] || 'image/jpeg', name: fileName } as any);
-    let url = `${BASE_URL}/api/file/minio/upload?biz=user_post`;
-    const headers: Record<string, string> = {};
-    if (tokenName && tokenValue) headers[tokenName] = tokenValue;
-    else if (apiKey) url += `&apiKey=${apiKey}`;
-    const resp = await fetch(url, { method: 'POST', headers, body: formData as any });
-    const json = await resp.json();
-    if (json.code === 0 && json.data) return json.data as string;
-  } catch {
-    /* ignore single file failure */
-  }
-  return null;
+function toLocalImage(uri: string, index = 0): LocalImage {
+  const fileName = uri.split('/').pop() || `moment_${Date.now()}_${index}.jpg`;
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  const mimeMap: Record<string, string> = {
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    heic: 'image/jpeg',
+  };
+  return {
+    uri,
+    fileName,
+    mimeType: mimeMap[ext ?? ''] || 'image/jpeg',
+  };
 }
 
 interface Props {
@@ -72,7 +65,7 @@ export default function MomentPublishModal({
   theme,
 }: Props) {
   const [content, setContent] = useState('');
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<LocalImage[]>([]);
   const [location, setLocation] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const s = styles(theme);
@@ -91,7 +84,7 @@ export default function MomentPublishModal({
       setImages(
         (editingMoment.mediaJson || [])
           .filter(i => i.type === 'image' && i.url)
-          .map(i => i.url),
+          .map((i, idx) => toLocalImage(i.url, idx)),
       );
       setLocation(editingMoment.location || '');
     } else if (!isEdit) {
@@ -100,14 +93,37 @@ export default function MomentPublishModal({
   }, [visible, isEdit, editingMoment?.id]);
 
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      quality: 0.8,
-    });
-    if (!result.canceled) {
-      const uris = result.assets.map(a => a.uri);
-      setImages(prev => [...prev, ...uris].slice(0, 9));
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert('权限请求', '需要访问相册权限才能选择图片');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        selectionLimit: 9,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const picked = result.assets.map((asset, index) => {
+        const ext =
+          asset.fileName?.split('.').pop()?.toLowerCase() ||
+          asset.mimeType?.split('/').pop() ||
+          'jpg';
+        const fileName = asset.fileName || `moment_${Date.now()}_${index}.${ext}`;
+        return {
+          uri: asset.uri,
+          fileName,
+          mimeType: asset.mimeType || 'image/jpeg',
+        };
+      });
+      setImages(prev => [...prev, ...picked].slice(0, 9));
+    } catch (e: any) {
+      Alert.alert('选择图片失败', e?.message || '请稍后重试');
     }
   };
 
@@ -116,9 +132,18 @@ export default function MomentPublishModal({
     setSubmitting(true);
     try {
       const uploadedUrls: string[] = [];
-      for (const uri of images) {
-        const url = await uploadImageUri(uri);
-        if (url) uploadedUrls.push(url);
+      for (const img of images) {
+        if (isRemoteImageUri(img.uri)) {
+          uploadedUrls.push(img.uri);
+          continue;
+        }
+        const res = await userApi.uploadPostImage(img.uri, img.fileName, img.mimeType);
+        if (res.data) uploadedUrls.push(res.data);
+      }
+
+      if (images.length > 0 && uploadedUrls.length === 0) {
+        Alert.alert('上传失败', '图片上传失败，请检查网络后重试');
+        return;
       }
 
       if (isEdit && editingMoment?.id && onUpdate) {
@@ -157,9 +182,9 @@ export default function MomentPublishModal({
             {images.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {images.map((uri, i) => (
-                    <View key={`${uri}-${i}`} style={s.imgWrap}>
-                      <Image source={{ uri }} style={s.imgThumb} />
+                  {images.map((img, i) => (
+                    <View key={`${img.uri}-${i}`} style={s.imgWrap}>
+                      <Image source={{ uri: img.uri }} style={s.imgThumb} />
                       <TouchableOpacity
                         style={s.imgRemove}
                         onPress={() => setImages(prev => prev.filter((_, idx) => idx !== i))}
@@ -180,7 +205,7 @@ export default function MomentPublishModal({
               maxLength={50}
             />
             <View style={s.footer}>
-              <TouchableOpacity onPress={pickImage} style={s.imgBtn}>
+              <TouchableOpacity onPress={pickImage} style={s.imgBtn} disabled={submitting}>
                 <Text style={s.imgBtnText}>🖼 图片</Text>
               </TouchableOpacity>
               <TouchableOpacity

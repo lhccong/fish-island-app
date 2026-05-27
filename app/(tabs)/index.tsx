@@ -238,7 +238,7 @@ export default function HomeScreen() {
             <Text style={[s.enterHint, { color: theme.tint }]}>进入 ›</Text>
           </View>
           <Text style={[s.pointsPlayDesc, { color: theme.icon }]}>
-            摸鱼股市 · 武道大会 · 无尽爬塔
+            摸鱼股市 · 武道大会 · 无尽爬塔 · 摸鱼农场
           </Text>
         </TouchableOpacity>
 

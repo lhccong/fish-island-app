@@ -41,7 +41,13 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "允许访问相册，用于发布鱼小圈图片"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
