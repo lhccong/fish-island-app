@@ -39,6 +39,8 @@ export interface CropDTO {
 
 export interface FarmStealRecordVO {
   id?: number;
+  /** 是否已读(0-未读、1-已读) */
+  isRead?: number;
   stealerId?: number;
   stealerNickname?: string;
   stealerAvatar?: string;
@@ -110,6 +112,11 @@ export const farmApi = {
 
   getMyStolenRecords(): Promise<ApiResponse<FarmStealRecordVO[]>> {
     return request.get('/api/steal/my-stolen');
+  },
+
+  /** 偷菜记录一键已读 POST /api/steal/my-stolen/read-all */
+  markAllStolenRecordsAsRead(): Promise<ApiResponse<boolean>> {
+    return request.post('/api/steal/my-stolen/read-all');
   },
 
   /** 互关好友农场列表 GET /api/farm/friend/list */

@@ -1,4 +1,5 @@
 import { BASE_URL } from '@/constants/api';
+import { isRemoteImageUri, preparePostImageForUpload } from '@/utils/imageUpload';
 import { request } from '@/utils/request';
 
 // 用户信息类型
@@ -335,7 +336,11 @@ export const userApi = {
     fileName: string,
     mimeType?: string,
   ): Promise<ApiResponse<string>> {
-    return this.uploadMinioImage(uri, fileName, 'user_post', mimeType);
+    if (isRemoteImageUri(uri)) {
+      return this.uploadMinioImage(uri, fileName, 'user_post', mimeType);
+    }
+    const prepared = await preparePostImageForUpload(uri, fileName, mimeType);
+    return this.uploadMinioImage(prepared.uri, prepared.fileName, 'user_post', prepared.mimeType);
   },
 
   /**

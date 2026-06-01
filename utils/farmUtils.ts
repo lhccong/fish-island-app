@@ -1,4 +1,4 @@
-import type { FarmFriendListVO, LandDTO } from '@/api/farm';
+import type { FarmFriendListVO, FarmStealRecordVO, LandDTO } from '@/api/farm';
 
 export const GRID_COLS = 6;
 export const GRID_ROWS = 4;
@@ -180,6 +180,11 @@ export function formatStolenTime(time?: string): string {
   const hh = String(d.getHours()).padStart(2, '0');
   const mi = String(d.getMinutes()).padStart(2, '0');
   return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+/** 偷菜记录是否未读（0-未读、1-已读） */
+export function isFarmStealRecordUnread(record: FarmStealRecordVO): boolean {
+  return record.isRead !== 1;
 }
 
 /** 拜访接口 friendUserId（字符串） */

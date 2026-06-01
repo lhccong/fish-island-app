@@ -4,6 +4,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import {
   formatStealCooldown,
   formatStolenTime,
+  isFarmStealRecordUnread,
   getFriendUserId,
   normalizeFarmFriend,
   unwrapFarmFriendList,
@@ -51,6 +52,8 @@ interface FarmFriendsModalProps {
   initialTab?: FriendTab;
   stolenRecords: FarmStealRecordVO[];
   stolenLoading: boolean;
+  markAllStolenReadLoading?: boolean;
+  onMarkAllStolenRead?: () => void | Promise<void>;
   myLevel: number;
   myNickname: string;
   myAvatar?: string;
@@ -65,6 +68,8 @@ export default function FarmFriendsModal({
   initialTab = 'play',
   stolenRecords,
   stolenLoading,
+  markAllStolenReadLoading = false,
+  onMarkAllStolenRead,
   myLevel,
   myNickname,
   myAvatar,
@@ -81,7 +86,10 @@ export default function FarmFriendsModal({
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('steal');
   const [sortOpen, setSortOpen] = useState(false);
-  const stolenCount = stolenRecords.length;
+  const unreadStolenCount = useMemo(
+    () => stolenRecords.filter(isFarmStealRecordUnread).length,
+    [stolenRecords],
+  );
 
   const loadFriends = useCallback(async () => {
     setFriendsLoading(true);
@@ -246,10 +254,21 @@ export default function FarmFriendsModal({
           <IconSymbol name="envelope.fill" size={22} color="#c62828" />
         </View>
         <Text style={styles.visitorTitle}>谁偷了我的菜</Text>
-        {stolenCount > 0 ? (
+        {unreadStolenCount > 0 ? (
           <View style={styles.visitorCount}>
-            <Text style={styles.visitorCountText}>{stolenCount}</Text>
+            <Text style={styles.visitorCountText}>{unreadStolenCount}</Text>
           </View>
+        ) : null}
+        {unreadStolenCount > 0 && onMarkAllStolenRead ? (
+          <TouchableOpacity
+            style={styles.readAllBtn}
+            disabled={markAllStolenReadLoading}
+            onPress={() => onMarkAllStolenRead()}
+          >
+            <Text style={styles.readAllBtnText}>
+              {markAllStolenReadLoading ? '处理中...' : '全部已读'}
+            </Text>
+          </TouchableOpacity>
         ) : null}
       </View>
       <ScrollView
@@ -267,7 +286,10 @@ export default function FarmFriendsModal({
           stolenRecords.map((record) => (
             <View
               key={String(record.id ?? `${record.stealerId}-${record.stolenTime}`)}
-              style={styles.stolenItem}
+              style={[
+                styles.stolenItem,
+                isFarmStealRecordUnread(record) && styles.stolenItemUnread,
+              ]}
             >
               <Image
                 source={{ uri: resolveAvatarUrl(record.stealerAvatar) || STEALER_AVATAR }}
@@ -322,10 +344,10 @@ export default function FarmFriendsModal({
                   <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
                     {tab.label}
                   </Text>
-                  {tab.key === 'visitor' && stolenCount > 0 ? (
+                  {tab.key === 'visitor' && unreadStolenCount > 0 ? (
                     <View style={styles.tabBadge}>
                       <Text style={styles.tabBadgeText}>
-                        {stolenCount > 99 ? '99+' : stolenCount}
+                        {unreadStolenCount > 99 ? '99+' : unreadStolenCount}
                       </Text>
                     </View>
                   ) : null}
@@ -646,13 +668,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  readAllBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,248,232,0.35)',
+    backgroundColor: 'rgba(232,200,114,0.28)',
+  },
+  readAllBtnText: {
+    color: '#fff8e8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   stolenItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.2)',
+  },
+  stolenItemUnread: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,193,80,0.55)',
+    backgroundColor: 'rgba(130,82,40,0.35)',
   },
   stolenDetail: {
     fontSize: 12,

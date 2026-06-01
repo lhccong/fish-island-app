@@ -4,9 +4,13 @@ import ImageMessage from '@/components/ImageMessage';
 import ImagePreviewModal from '@/components/ImagePreviewModal';
 import ContextMenu, { ContextMenuItem } from '@/components/ContextMenu';
 import { userRemarkApi } from '@/api/userRemark';
+import LuckyBagDetailModal from '@/components/LuckyBagDetailModal';
+import LuckyBagDialog from '@/components/LuckyBagDialog';
+import LuckyBagMessageCard from '@/components/LuckyBagMessageCard';
 import RedPacketDetailModal from '@/components/RedPacketDetailModal';
 import RedPacketDialog from '@/components/RedPacketDialog';
 import RedPacketMessageCard from '@/components/RedPacketMessageCard';
+import { luckyBagApi, LuckyBag } from '@/api/luckyBag';
 import OtherUserPetModal, { OtherPetTarget } from '@/components/pet/OtherUserPetModal';
 import UserDetailModal from '@/components/UserDetailModal';
 import UserInfoCard, { UserProfileSnapshot } from '@/components/UserInfoCard';
@@ -28,6 +32,7 @@ import {
   saveCachedRemarks,
   UserRemarksMap,
 } from '@/utils/chatPreferences';
+import { isLuckyBagContent, LUCKY_BAG_IMAGE } from '@/utils/luckyBag';
 import { isRedPacketContent, parseRedPacketContent } from '@/utils/redPacket';
 import { toast } from '@/utils/toast';
 import wsManager, { BACKEND_HOST_WS } from '@/utils/websocket';
@@ -275,6 +280,7 @@ export default function ChatroomScreen() {
   // 使用 ref 存储最新的 isAtBottom 状态，避免闭包问题
   const isAtBottomRef = useRef(true);
   const hasInitialScrolledRef = useRef(false);
+  const pendingScrollToBottomRef = useRef(false);
   const isLoadingMoreRef = useRef(false);
   const currentPageRef = useRef(1);
 
@@ -287,6 +293,10 @@ export default function ChatroomScreen() {
 
   // 红包相关状态
   const [showRedPacketDialog, setShowRedPacketDialog] = useState(false);
+  const [showLuckyBagDialog, setShowLuckyBagDialog] = useState(false);
+  const [activeLuckyBags, setActiveLuckyBags] = useState<LuckyBag[]>([]);
+  const [luckyBagListVisible, setLuckyBagListVisible] = useState(false);
+  const [selectedLuckyBagId, setSelectedLuckyBagId] = useState<string | null>(null);
   const [showRedPacketDetail, setShowRedPacketDetail] = useState(false);
   const [selectedRedPacketId, setSelectedRedPacketId] = useState<string | null>(null);
   const [selectedRedPacketSender, setSelectedRedPacketSender] = useState<{ name: string; avatar: string; msg: string } | null>(null);
@@ -346,6 +356,29 @@ export default function ChatroomScreen() {
     if (isAtBottomRef.current) {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     }
+  }, []);
+
+  const scrollToBottomForce = useCallback((animated = false) => {
+    pendingScrollToBottomRef.current = true;
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
+    setNewMessageCount(0);
+    lastMessageCountRef.current = 0;
+
+    const doScroll = () => flatListRef.current?.scrollToEnd({ animated });
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        doScroll();
+        setTimeout(doScroll, 50);
+        setTimeout(doScroll, 150);
+        setTimeout(() => {
+          doScroll();
+          pendingScrollToBottomRef.current = false;
+          hasInitialScrolledRef.current = true;
+        }, 300);
+      });
+    });
   }, []);
 
   const dismissInputPopups = useCallback(() => {
@@ -447,16 +480,45 @@ export default function ChatroomScreen() {
     loadPreferences();
   }, [currentUser?.userName]);
 
-  // 每次进入 tab 时重新连接 WebSocket 并加载最新消息
+  // 每次进入 tab 时重新连接 WebSocket 并加载最新消息，并滚到底部
   useFocusEffect(
     useCallback(() => {
+      hasInitialScrolledRef.current = false;
+      pendingScrollToBottomRef.current = true;
+      isAtBottomRef.current = true;
+      setIsAtBottom(true);
+      setNewMessageCount(0);
       connectWebSocket();
+      // 已有消息时先滚到底部，避免等待接口返回期间仍停在旧位置
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      });
       loadMessages();
       return () => {
         wsManager.close(CONNECTION_ID);
       };
     }, [])
   );
+
+  const fetchActiveLuckyBags = useCallback(async () => {
+    try {
+      const res = await luckyBagApi.getActive();
+      if (res.code === 0 && res.data) {
+        setActiveLuckyBags(res.data);
+      } else {
+        setActiveLuckyBags([]);
+      }
+    } catch (e) {
+      console.error('获取活跃福袋失败:', e);
+      setActiveLuckyBags([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchActiveLuckyBags();
+    const timer = setInterval(fetchActiveLuckyBags, 30000);
+    return () => clearInterval(timer);
+  }, [fetchActiveLuckyBags]);
 
   // 获取在线用户列表（参考 utools：挂载时拉一次 + 每 30s 轮询）
   useEffect(() => {
@@ -532,15 +594,6 @@ export default function ChatroomScreen() {
     };
   }, [currentUser?.userName, isBlacklisted]);
 
-  // 滚动到底部
-  const scrollToBottom = (animated = true) => {
-    if (flatListRef.current && messages.length > 0) {
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToEnd({ animated });
-      });
-    }
-  };
-
   // 检查是否在底部，同时处理滚到顶部加载更多
   const checkIfAtBottom = (event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
@@ -610,10 +663,7 @@ export default function ChatroomScreen() {
           });
           setMessages(uniqueMessages);
           hasInitialScrolledRef.current = false;
-          // 首次加载后滚动到底部
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: false });
-          }, 100);
+          scrollToBottomForce(false);
         } else {
           // 加载更多历史消息，插入到前面（去重）
           const newMsgs = transformedMessages.reverse();
@@ -670,10 +720,7 @@ export default function ChatroomScreen() {
     // 清除引用消息
     setQuotedMessage(null);
 
-    // 发送后滚到底部，用 setTimeout 确保渲染完成后再滚动
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 50);
+    scrollToBottomForce(true);
 
     // 通过 WebSocket 发送消息（参考 utools type:2 格式，message 为完整对象）
     try {
@@ -803,10 +850,7 @@ export default function ChatroomScreen() {
 
             setMessages((prev) => [...prev, optimisticMsg]);
 
-            // Scroll to bottom
-            setTimeout(() => {
-              flatListRef.current?.scrollToEnd({ animated: true });
-            }, 50);
+            scrollToBottomForce(true);
 
             // Send message through WebSocket
             try {
@@ -927,7 +971,7 @@ export default function ChatroomScreen() {
     };
 
     setMessages((prev) => [...prev, optimisticMsg]);
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+    scrollToBottomForce(true);
 
     const message = {
       id: `${now}`,
@@ -1136,10 +1180,7 @@ export default function ChatroomScreen() {
 
     setMessages((prev) => [...prev, optimisticMsg]);
 
-    // 滚动到底部
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 50);
+    scrollToBottomForce(true);
 
     // 发送图片消息到聊天室
     const message = {
@@ -1257,10 +1298,7 @@ export default function ChatroomScreen() {
       };
       setMessages((prev) => [...prev, optimisticMsg]);
 
-      // 滚动到底部
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 50);
+      scrollToBottomForce(true);
 
       // 发送红包消息到聊天室
       const message = {
@@ -1359,6 +1397,7 @@ export default function ChatroomScreen() {
     // 使用 userName 来判断是否是当前用户（参考 utools）
     const isSelf = item.userName === currentUser?.userName;
     const isRedPacketMessage = isRedPacketContent(item.content || item.md);
+    const isLuckyBagMessage = isLuckyBagContent(item.content || item.md);
     const isImageMsg = isImageMessage(item.content);
     const imageUrls = parseImageUrls(item.content);
     const hasQuotedMessage = item.quotedMessage || (item.rawMessage?.quotedMessage);
@@ -1405,7 +1444,9 @@ export default function ChatroomScreen() {
           {/* 引用消息 */}
           {hasQuotedMessage && renderQuotedMessage(quoted, isSelf)}
 
-          {isRedPacketMessage ? (
+          {isLuckyBagMessage ? (
+            <LuckyBagMessageCard content={item.content} md={item.md} />
+          ) : isRedPacketMessage ? (
             <RedPacketMessageCard
               message={item}
               onViewDetails={handleViewRedPacketDetails}
@@ -1443,15 +1484,29 @@ export default function ChatroomScreen() {
           </Text>
           <View style={[styles.connectionStatus, { backgroundColor: isConnected ? '#4CAF50' : '#FF6B6B' }]} />
         </View>
-        <TouchableOpacity
-          style={styles.headerRight}
-          onPress={() => setShowOnlineUsers(!showOnlineUsers)}
-        >
-          <IconSymbol name="person.2.fill" size={20} color={theme.tint} />
-          <Text style={[styles.onlineCount, { color: theme.tint }]}>
-            {onlineUsers.length}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {activeLuckyBags.length > 0 ? (
+            <TouchableOpacity
+              style={styles.luckyBagHeaderEntry}
+              onPress={() => setLuckyBagListVisible(true)}
+              accessibilityLabel="查看进行中的福袋"
+            >
+              <Image source={{ uri: LUCKY_BAG_IMAGE }} style={styles.luckyBagHeaderImage} />
+              <View style={styles.luckyBagEntryBadge}>
+                <Text style={styles.luckyBagEntryBadgeText}>{activeLuckyBags.length}</Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            style={styles.headerOnlineButton}
+            onPress={() => setShowOnlineUsers(!showOnlineUsers)}
+          >
+            <IconSymbol name="person.2.fill" size={20} color={theme.tint} />
+            <Text style={[styles.onlineCount, { color: theme.tint }]}>
+              {onlineUsers.length}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* 当前话题 */}
@@ -1531,9 +1586,6 @@ export default function ChatroomScreen() {
               }}
             />
           )}
-          {isLoadingMore && (
-            <ActivityIndicator style={styles.loadingMore} color={theme.tint} />
-          )}
           <FlatList
             ref={flatListRef}
             data={messages}
@@ -1545,12 +1597,14 @@ export default function ChatroomScreen() {
             keyboardShouldPersistTaps="handled"
             onScroll={checkIfAtBottom}
             scrollEventThrottle={16}
-            onContentSizeChange={(_, newHeight) => {
-              if (!hasInitialScrolledRef.current && newHeight > 0) {
+            ListHeaderComponent={
+              isLoadingMore ? (
+                <ActivityIndicator style={styles.loadingMore} color={theme.tint} />
+              ) : null
+            }
+            onContentSizeChange={() => {
+              if (pendingScrollToBottomRef.current || !hasInitialScrolledRef.current) {
                 flatListRef.current?.scrollToEnd({ animated: false });
-                setTimeout(() => {
-                  hasInitialScrolledRef.current = true;
-                }, 300);
               }
             }}
             maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: undefined }}
@@ -1568,9 +1622,7 @@ export default function ChatroomScreen() {
         {newMessageCount > 0 && !isAtBottom && (
           <Animated.View style={[styles.newMessageNotification, newMessageAnimatedStyle]}>
             <TouchableOpacity
-              onPress={() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-              }}
+              onPress={() => scrollToBottomForce(true)}
             >
               <IconSymbol name="chevron.down" size={16} color="#fff" />
               <Text style={styles.newMessageNotificationText}>
@@ -1715,7 +1767,31 @@ export default function ChatroomScreen() {
               </View>
               <Text style={[styles.menuBubbleText, { color: theme.text }]}>红包</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuBubbleItem}
+              onPress={() => {
+                setShowMenu(false);
+                setShowLuckyBagDialog(true);
+              }}
+            >
+              <View style={[styles.menuBubbleIcon, { backgroundColor: 'rgba(255, 193, 80, 0.15)' }]}>
+                <Text style={{ fontSize: 18 }}>🧧</Text>
+              </View>
+              <Text style={[styles.menuBubbleText, { color: theme.text }]}>福袋</Text>
+            </TouchableOpacity>
           </Animated.View>
+        )}
+
+        {isLoading && (
+          <View
+            style={[
+              styles.chatLoadingOverlay,
+              { backgroundColor: isDark ? 'rgba(0, 0, 0, 0.45)' : 'rgba(255, 255, 255, 0.75)' },
+            ]}
+          >
+            <ActivityIndicator size="large" color={theme.tint} />
+          </View>
         )}
       </View>
 
@@ -1787,6 +1863,56 @@ export default function ChatroomScreen() {
           </TouchableWithoutFeedback>
         </Pressable>
       </Modal>
+
+      <Modal
+        visible={luckyBagListVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLuckyBagListVisible(false)}
+      >
+        <Pressable style={styles.luckyBagListOverlay} onPress={() => setLuckyBagListVisible(false)}>
+          <Pressable style={[styles.luckyBagListPanel, { backgroundColor: theme.card }]} onPress={(e) => e.stopPropagation()}>
+            <Text style={[styles.luckyBagListTitle, { color: theme.text }]}>
+              进行中的福袋 ({activeLuckyBags.length})
+            </Text>
+            {activeLuckyBags.length === 0 ? (
+              <Text style={{ color: theme.icon, textAlign: 'center', padding: 24 }}>暂无进行中的福袋</Text>
+            ) : (
+              activeLuckyBags.map((bag) => (
+                <TouchableOpacity
+                  key={bag.id}
+                  style={styles.luckyBagListItem}
+                  onPress={() => {
+                    setSelectedLuckyBagId(bag.id ?? null);
+                    setLuckyBagListVisible(false);
+                  }}
+                >
+                  <Image source={{ uri: LUCKY_BAG_IMAGE }} style={styles.luckyBagListImage} contentFit="contain" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.luckyBagListName, { color: theme.text }]}>{bag.name || '福袋'}</Text>
+                    <Text style={{ color: theme.icon, fontSize: 12, marginTop: 4 }}>
+                      {bag.totalAmount} 积分 · {bag.winnerCount} 人 · {bag.joined ? '已参与' : '未参与'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <LuckyBagDetailModal
+        visible={!!selectedLuckyBagId}
+        luckyBagId={selectedLuckyBagId}
+        onClose={() => setSelectedLuckyBagId(null)}
+        onJoined={fetchActiveLuckyBags}
+      />
+
+      <LuckyBagDialog
+        visible={showLuckyBagDialog}
+        onClose={() => setShowLuckyBagDialog(false)}
+        onSent={fetchActiveLuckyBags}
+      />
 
       {/* 发红包对话框 */}
       <RedPacketDialog
@@ -1884,6 +2010,12 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
   },
+  chatLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   listContainer: {
     flex: 1,
     position: 'relative',
@@ -1918,6 +2050,11 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  headerOnlineButton: {
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -2229,5 +2366,68 @@ const styles = StyleSheet.create({
   userInfoOverlay: {
     flex: 1,
     backgroundColor: 'transparent',
+  },
+  luckyBagHeaderEntry: {
+    position: 'relative',
+  },
+  luckyBagHeaderImage: {
+    width: 36,
+    height: 36,
+  },
+  luckyBagEntryBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ff4d4f',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+    shadowColor: '#ff4d4f',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  luckyBagEntryBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  luckyBagListOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  luckyBagListPanel: {
+    borderRadius: 12,
+    padding: 16,
+    maxHeight: '70%',
+  },
+  luckyBagListTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  luckyBagListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0,0,0,0.08)',
+  },
+  luckyBagListImage: {
+    width: 40,
+    height: 40,
+  },
+  luckyBagListName: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

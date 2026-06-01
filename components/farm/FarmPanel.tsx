@@ -40,6 +40,7 @@ import {
   resolveStealLandId,
   resolveFriendUserId,
   sumStealCoinGained,
+  isFarmStealRecordUnread,
   toLandIndex,
   TOTAL_LANDS,
 } from '@/utils/farmUtils';
@@ -79,6 +80,7 @@ export default function FarmPanel() {
   const [now, setNow] = useState(Date.now());
   const [stolenRecords, setStolenRecords] = useState<FarmStealRecordVO[]>([]);
   const [stolenLoading, setStolenLoading] = useState(false);
+  const [markAllStolenReadLoading, setMarkAllStolenReadLoading] = useState(false);
   const initialGridW = Math.max(
     0,
     width - 24 - (BOARD_OUTER_PAD + BOARD_INNER_PAD) * 2,
@@ -131,6 +133,11 @@ export default function FarmPanel() {
     () =>
       isVisitingFriend ? friendLands.filter((l) => canStealOnFriendLand(l, now)) : [],
     [friendLands, now, isVisitingFriend],
+  );
+
+  const unreadStolenCount = useMemo(
+    () => stolenRecords.filter(isFarmStealRecordUnread).length,
+    [stolenRecords],
   );
 
   const nearestGrowingMs = useMemo(() => {
@@ -197,6 +204,27 @@ export default function FarmPanel() {
       setStolenLoading(false);
     }
   }, []);
+
+  const handleMarkAllStolenRead = useCallback(async () => {
+    if (unreadStolenCount === 0) {
+      toast.info('没有未读记录');
+      return;
+    }
+    setMarkAllStolenReadLoading(true);
+    try {
+      const res = await farmApi.markAllStolenRecordsAsRead();
+      if (res.code === 0) {
+        toast.success('已全部标记为已读');
+        await loadStolenRecords();
+      } else {
+        toast.error(res.msg || res.message || '标记已读失败');
+      }
+    } catch {
+      toast.error('标记已读失败');
+    } finally {
+      setMarkAllStolenReadLoading(false);
+    }
+  }, [unreadStolenCount, loadStolenRecords]);
 
   const refreshLandsAndFarmUser = useCallback(async () => {
     try {
@@ -674,12 +702,12 @@ export default function FarmPanel() {
                 <TouchableOpacity
                   style={styles.decoMail}
                   onPress={() => openFriendsModal('visitor')}
-                  accessibilityLabel={`谁偷了我的菜，${stolenRecords.length} 条记录`}
+                  accessibilityLabel={`谁偷了我的菜，${unreadStolenCount} 条未读`}
                 >
-                  {stolenRecords.length > 0 ? (
+                  {unreadStolenCount > 0 ? (
                     <View style={styles.mailBadge}>
                       <Text style={styles.mailBadgeText}>
-                        {stolenRecords.length > 99 ? '99+' : stolenRecords.length}
+                        {unreadStolenCount > 99 ? '99+' : unreadStolenCount}
                       </Text>
                     </View>
                   ) : null}
@@ -816,6 +844,8 @@ export default function FarmPanel() {
         myAvatar={farmUser?.userAvatar ?? userInfo?.userAvatar}
         onClose={() => setFriendsVisible(false)}
         onRefreshStolen={loadStolenRecords}
+        markAllStolenReadLoading={markAllStolenReadLoading}
+        onMarkAllStolenRead={handleMarkAllStolenRead}
         visitLoadingId={visitLoadingId}
         onVisitFriend={async (friend) => {
           const ok = await visitFarmByUserId(friend);

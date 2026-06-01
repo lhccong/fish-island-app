@@ -3,6 +3,8 @@ import { ContextMenuItem } from '@/components/ContextMenu';
 
 const isImageHtml = (content?: string) => /<img[^>]+src=/i.test(content || '');
 
+import { isLuckyBagContent } from '@/utils/luckyBag';
+
 const isRedPacketMessage = (content?: string) => {
   if (!content) return false;
   if (/\[redpacket\]\s*[\s\S]*?\s*\[\/redpacket\]/i.test(content)) return true;
@@ -17,6 +19,7 @@ const isRedPacketMessage = (content?: string) => {
 const isSpecialMessage = (content?: string) => {
   if (!content) return false;
   if (isRedPacketMessage(content)) return true;
+  if (isLuckyBagContent(content)) return true;
   if (/\[weather\]/i.test(content) || /\[music\]/i.test(content)) return true;
   return false;
 };
