@@ -352,34 +352,51 @@ export default function ChatroomScreen() {
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
-  const scrollToBottomIfNeeded = useCallback(() => {
-    if (isAtBottomRef.current) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-    }
-  }, []);
+  const scrollToBottomRafRef = useRef<number | null>(null);
 
-  const scrollToBottomForce = useCallback((animated = false) => {
-    pendingScrollToBottomRef.current = true;
+  const scrollToBottom = useCallback(() => {
     isAtBottomRef.current = true;
     setIsAtBottom(true);
     setNewMessageCount(0);
     lastMessageCountRef.current = 0;
+    pendingScrollToBottomRef.current = true;
 
-    const doScroll = () => flatListRef.current?.scrollToEnd({ animated });
+    if (scrollToBottomRafRef.current != null) {
+      cancelAnimationFrame(scrollToBottomRafRef.current);
+    }
 
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        doScroll();
-        setTimeout(doScroll, 50);
-        setTimeout(doScroll, 150);
-        setTimeout(() => {
-          doScroll();
-          pendingScrollToBottomRef.current = false;
-          hasInitialScrolledRef.current = true;
-        }, 300);
-      });
+    scrollToBottomRafRef.current = requestAnimationFrame(() => {
+      scrollToBottomRafRef.current = null;
+      flatListRef.current?.scrollToEnd({ animated: false });
     });
   }, []);
+
+  const keyboardScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scrollToBottomIfNeeded = useCallback(() => {
+    if (!isAtBottomRef.current) return;
+    scrollToBottom();
+    // 键盘动画期间 list marginBottom 会持续变化，需在布局稳定后再滚一次
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (isAtBottomRef.current) {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        }
+      });
+    });
+    if (keyboardScrollTimeoutRef.current != null) {
+      clearTimeout(keyboardScrollTimeoutRef.current);
+    }
+    keyboardScrollTimeoutRef.current = setTimeout(() => {
+      keyboardScrollTimeoutRef.current = null;
+      if (isAtBottomRef.current) {
+        flatListRef.current?.scrollToEnd({ animated: false });
+        pendingScrollToBottomRef.current = false;
+      }
+    }, Platform.OS === 'ios' ? 300 : 120);
+  }, [scrollToBottom]);
+
+  const scrollToBottomForce = scrollToBottom;
 
   const dismissInputPopups = useCallback(() => {
     setShowEmojiPicker(false);
@@ -402,6 +419,9 @@ export default function ChatroomScreen() {
 
     const frameSub = Keyboard.addListener(frameEvent, (event: KeyboardEvent) => {
       applyKeyboardFrame(event.endCoordinates.screenY);
+      if (event.endCoordinates.height > 0) {
+        scrollToBottomIfNeeded();
+      }
     });
 
     const showSub = Keyboard.addListener(showEvent, (event: KeyboardEvent) => {
@@ -414,12 +434,20 @@ export default function ChatroomScreen() {
       if (Platform.OS === 'android') {
         applyKeyboardFrame(windowHeight);
       }
+      if (keyboardScrollTimeoutRef.current != null) {
+        clearTimeout(keyboardScrollTimeoutRef.current);
+        keyboardScrollTimeoutRef.current = null;
+      }
     });
 
     return () => {
       frameSub.remove();
       showSub.remove();
       hideSub.remove();
+      if (keyboardScrollTimeoutRef.current != null) {
+        clearTimeout(keyboardScrollTimeoutRef.current);
+        keyboardScrollTimeoutRef.current = null;
+      }
     };
   }, [dismissInputPopups, footerBottom, scrollToBottomIfNeeded, tabBarHeight]);
 
@@ -562,21 +590,19 @@ export default function ChatroomScreen() {
 
         // 用 requestAnimationFrame 等待本次渲染完成后再滚动（参考 utools nextTick + requestAnimationFrame）
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (wasAtBottom || isSelf) {
-              // 在底部：平滑顶上去；自己发的：直接跳底部
-              flatListRef.current?.scrollToEnd({ animated: wasAtBottom && !isSelf });
-              setNewMessageCount(0);
-              lastMessageCountRef.current = 0;
-            } else {
-              // 不在底部：累加新消息数，显示提示按钮
-              setNewMessageCount((prev) => {
-                const next = prev + 1;
-                lastMessageCountRef.current = next;
-                return next;
-              });
-            }
-          });
+          if (wasAtBottom || isSelf) {
+            pendingScrollToBottomRef.current = true;
+            flatListRef.current?.scrollToEnd({ animated: false });
+            setNewMessageCount(0);
+            lastMessageCountRef.current = 0;
+          } else {
+            // 不在底部：累加新消息数，显示提示按钮
+            setNewMessageCount((prev) => {
+              const next = prev + 1;
+              lastMessageCountRef.current = next;
+              return next;
+            });
+          }
         });
       } else if (data.type === 'online' && data.data) {
         const transformedUsers = transformOnlineUsers(data.data.users || []);
@@ -663,7 +689,7 @@ export default function ChatroomScreen() {
           });
           setMessages(uniqueMessages);
           hasInitialScrolledRef.current = false;
-          scrollToBottomForce(false);
+          scrollToBottomForce();
         } else {
           // 加载更多历史消息，插入到前面（去重）
           const newMsgs = transformedMessages.reverse();
@@ -720,7 +746,7 @@ export default function ChatroomScreen() {
     // 清除引用消息
     setQuotedMessage(null);
 
-    scrollToBottomForce(true);
+    scrollToBottomForce();
 
     // 通过 WebSocket 发送消息（参考 utools type:2 格式，message 为完整对象）
     try {
@@ -850,7 +876,7 @@ export default function ChatroomScreen() {
 
             setMessages((prev) => [...prev, optimisticMsg]);
 
-            scrollToBottomForce(true);
+            scrollToBottomForce();
 
             // Send message through WebSocket
             try {
@@ -971,7 +997,7 @@ export default function ChatroomScreen() {
     };
 
     setMessages((prev) => [...prev, optimisticMsg]);
-    scrollToBottomForce(true);
+    scrollToBottomForce();
 
     const message = {
       id: `${now}`,
@@ -1180,7 +1206,7 @@ export default function ChatroomScreen() {
 
     setMessages((prev) => [...prev, optimisticMsg]);
 
-    scrollToBottomForce(true);
+    scrollToBottomForce();
 
     // 发送图片消息到聊天室
     const message = {
@@ -1298,7 +1324,7 @@ export default function ChatroomScreen() {
       };
       setMessages((prev) => [...prev, optimisticMsg]);
 
-      scrollToBottomForce(true);
+      scrollToBottomForce();
 
       // 发送红包消息到聊天室
       const message = {
@@ -1603,11 +1629,18 @@ export default function ChatroomScreen() {
               ) : null
             }
             onContentSizeChange={() => {
-              if (pendingScrollToBottomRef.current || !hasInitialScrolledRef.current) {
-                flatListRef.current?.scrollToEnd({ animated: false });
+              if (!pendingScrollToBottomRef.current && hasInitialScrolledRef.current) {
+                return;
               }
+              flatListRef.current?.scrollToEnd({ animated: false });
+              pendingScrollToBottomRef.current = false;
+              hasInitialScrolledRef.current = true;
             }}
-            maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: undefined }}
+            maintainVisibleContentPosition={
+              isLoadingMore
+                ? { minIndexForVisible: 1, autoscrollToTopThreshold: 24 }
+                : undefined
+            }
             onScrollToIndexFailed={(info) => {
               flatListRef.current?.scrollToOffset({
                 offset: info.averageItemLength * info.index,
@@ -1622,7 +1655,7 @@ export default function ChatroomScreen() {
         {newMessageCount > 0 && !isAtBottom && (
           <Animated.View style={[styles.newMessageNotification, newMessageAnimatedStyle]}>
             <TouchableOpacity
-              onPress={() => scrollToBottomForce(true)}
+              onPress={() => scrollToBottomForce()}
             >
               <IconSymbol name="chevron.down" size={16} color="#fff" />
               <Text style={styles.newMessageNotificationText}>
@@ -1692,6 +1725,7 @@ export default function ChatroomScreen() {
             placeholderTextColor={theme.icon}
             value={inputText}
             onChangeText={setInputText}
+            onFocus={scrollToBottomIfNeeded}
             onSubmitEditing={sendMessage}
             blurOnSubmit={false}
             returnKeyType="send"

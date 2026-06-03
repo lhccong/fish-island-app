@@ -1,14 +1,8 @@
+import TimePickerField from './TimePickerField';
 import { Colors } from '@/constants/theme';
 import type { MoYuSettings } from '@/utils/moyuTime';
 import React, { useEffect, useState } from 'react';
-import {
-  Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface Props {
   visible: boolean;
@@ -38,25 +32,26 @@ export default function MoYuTimeSettingsModal({
       <View style={s.overlay}>
         <View style={[s.card, { backgroundColor: theme.card }]}>
           <Text style={[s.title, { color: theme.text }]}>摸鱼时间设置</Text>
+          <Text style={[s.hint, { color: theme.icon }]}>点击时间使用滚轮选择</Text>
 
-          {(
-            [
-              { key: 'startTime' as const, label: '上班时间' },
-              { key: 'lunchTime' as const, label: '午饭时间' },
-              { key: 'endTime' as const, label: '下班时间' },
-            ] as const
-          ).map(({ key, label }) => (
-            <View key={key} style={s.row}>
-              <Text style={[s.label, { color: theme.text }]}>{label}</Text>
-              <TextInput
-                style={[s.input, { color: theme.text, borderColor: theme.border }]}
-                value={draft[key]}
-                onChangeText={(t) => setDraft((prev) => ({ ...prev, [key]: t }))}
-                placeholder="09:00"
-                placeholderTextColor={theme.icon}
-              />
-            </View>
-          ))}
+          <TimePickerField
+            label="上班时间"
+            value={draft.startTime}
+            theme={theme}
+            onChange={(startTime) => setDraft((prev) => ({ ...prev, startTime }))}
+          />
+          <TimePickerField
+            label="午饭时间"
+            value={draft.lunchTime}
+            theme={theme}
+            onChange={(lunchTime) => setDraft((prev) => ({ ...prev, lunchTime }))}
+          />
+          <TimePickerField
+            label="下班时间"
+            value={draft.endTime}
+            theme={theme}
+            onChange={(endTime) => setDraft((prev) => ({ ...prev, endTime }))}
+          />
 
           <View style={s.row}>
             <Text style={[s.label, { color: theme.text }]}>工作制度</Text>
@@ -72,7 +67,10 @@ export default function MoYuTimeSettingsModal({
                   style={[
                     s.chip,
                     { borderColor: theme.border },
-                    draft.workdayType === v && { borderColor: theme.tint, backgroundColor: theme.tint + '18' },
+                    draft.workdayType === v && {
+                      borderColor: theme.tint,
+                      backgroundColor: theme.tint + '18',
+                    },
                   ]}
                   onPress={() => setDraft((prev) => ({ ...prev, workdayType: v }))}
                 >
@@ -119,13 +117,6 @@ const styles = (theme: typeof Colors['light']) =>
     hint: { fontSize: 12, marginBottom: 16 },
     row: { marginBottom: 14 },
     label: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
-    input: {
-      borderWidth: 1,
-      borderRadius: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      fontSize: 15,
-    },
     chips: { flexDirection: 'row', gap: 8 },
     chip: {
       paddingHorizontal: 16,

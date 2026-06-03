@@ -47,7 +47,8 @@
         {
           "photosPermission": "允许访问相册，用于发布鱼小圈图片"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

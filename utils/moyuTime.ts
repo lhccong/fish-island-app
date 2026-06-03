@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BASE_URL } from '@/constants/api';
+import holiday2026 from '@/assets/data/2026-holiday.json';
 
 const MOYU_STORAGE_KEY = 'moYuData';
 
@@ -20,7 +21,7 @@ export const DEFAULT_MOYU_SETTINGS: MoYuSettings = {
   workdayType: 'double',
 };
 
-export type TimeInfoType = 'lunch' | 'work' | 'holiday';
+export type TimeInfoType = 'beforeWork' | 'lunch' | 'work' | 'holiday';
 
 export interface TimeInfo {
   type: TimeInfoType;
@@ -33,6 +34,12 @@ export interface HolidayInfo {
   date: string;
 }
 
+interface HolidayDay {
+  name: string;
+  date: string;
+  isOffDay?: boolean;
+}
+
 function parseHm(hm: string): { h: number; m: number } {
   const [h, m] = hm.split(':').map(Number);
   return { h: h || 0, m: m || 0 };
@@ -42,6 +49,18 @@ function setHm(base: Date, hm: string): Date {
   const { h, m } = parseHm(hm);
   const d = new Date(base);
   d.setHours(h, m, 0, 0);
+  return d;
+}
+
+/** 解析 YYYY-MM-DD 为本地零点，避免 UTC 偏移 */
+export function parseLocalDate(dateStr: string): Date {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  return new Date(y, (mo || 1) - 1, d || 1, 0, 0, 0, 0);
+}
+
+function startOfLocalDay(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
   return d;
 }
 
@@ -72,7 +91,7 @@ function pad2(n: number) {
   return String(n).padStart(2, '0');
 }
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSec / 3600);
   const minutes = Math.floor((totalSec % 3600) / 60);
@@ -81,15 +100,12 @@ function formatDuration(ms: number): string {
   return `${hours}:${pad2(minutes)}:${pad2(seconds)}`;
 }
 
-export function computeTimeInfo(settings: MoYuSettings, now = new Date()): TimeInfo {
-  if (!isWorkday(settings, now)) {
-    return { type: 'holiday', timeRemaining: '今天休息，好好放松一下吧~' };
-  }
-
-  const start = setHm(now, settings.startTime);
-  const end = setHm(now, settings.endTime);
-  const lunchAt = setHm(now, settings.lunchTime);
-
+function calcEarnedAmount(
+  settings: MoYuSettings,
+  now: Date,
+  start: Date,
+  end: Date,
+): number | undefined {
   let workHoursPerDay = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
   if (workHoursPerDay <= 0) workHoursPerDay = 8;
 
@@ -99,6 +115,7 @@ export function computeTimeInfo(settings: MoYuSettings, now = new Date()): TimeI
     settings.monthlySalary && monthlyWorkHours > 0
       ? settings.monthlySalary / monthlyWorkHours
       : 0;
+  if (hourlyRate <= 0) return undefined;
 
   let workedHours = 0;
   if (now > start && now < end) {
@@ -106,28 +123,48 @@ export function computeTimeInfo(settings: MoYuSettings, now = new Date()): TimeI
   } else if (now >= end) {
     workedHours = workHoursPerDay;
   }
-  const earnedAmount = hourlyRate > 0 ? hourlyRate * workedHours : undefined;
+  return hourlyRate * workedHours;
+}
 
-  const lunchDiffMin = (now.getTime() - lunchAt.getTime()) / (1000 * 60);
-  const isNearLunch = Math.abs(lunchDiffMin) <= 120 && lunchDiffMin <= 60;
+const LUNCH_BREAK_MS = 60 * 60 * 1000;
 
-  if (isNearLunch) {
+export function computeTimeInfo(settings: MoYuSettings, now = new Date()): TimeInfo {
+  if (!isWorkday(settings, now)) {
+    return { type: 'holiday', timeRemaining: '今天休息，好好放松一下吧~' };
+  }
+
+  const start = setHm(now, settings.startTime);
+  const end = setHm(now, settings.endTime);
+  const lunchAt = setHm(now, settings.lunchTime);
+  const earnedAmount = calcEarnedAmount(settings, now, start, end);
+
+  if (now < start) {
+    const remain = start.getTime() - now.getTime();
+    return { type: 'beforeWork', timeRemaining: formatDuration(remain), earnedAmount };
+  }
+
+  if (now < lunchAt) {
     const remain = lunchAt.getTime() - now.getTime();
-    if (remain <= 0) {
-      return { type: 'lunch', timeRemaining: '已到午餐时间', earnedAmount };
-    }
     return { type: 'lunch', timeRemaining: formatDuration(remain), earnedAmount };
   }
 
-  const remain = end.getTime() - now.getTime();
-  if (remain <= 0) {
-    return { type: 'work', timeRemaining: '已到下班时间', earnedAmount };
+  if (now < new Date(lunchAt.getTime() + LUNCH_BREAK_MS)) {
+    return { type: 'lunch', timeRemaining: '已到午餐时间', earnedAmount };
   }
-  return { type: 'work', timeRemaining: formatDuration(remain), earnedAmount };
+
+  if (now < end) {
+    const remain = end.getTime() - now.getTime();
+    return { type: 'work', timeRemaining: formatDuration(remain), earnedAmount };
+  }
+
+  return { type: 'work', timeRemaining: '已到下班时间', earnedAmount };
 }
 
 export function getTimeInfoLabel(info: TimeInfo): string {
   if (info.type === 'holiday') return info.timeRemaining;
+  if (info.type === 'beforeWork') {
+    return `距离上班还有 ${info.timeRemaining}`;
+  }
   if (info.type === 'lunch') {
     if (info.timeRemaining === '已到午餐时间') return '已到午餐时间';
     return `距离午餐还有 ${info.timeRemaining}`;
@@ -138,6 +175,7 @@ export function getTimeInfoLabel(info: TimeInfo): string {
 
 export function getTimeInfoEmoji(info: TimeInfo): string {
   if (info.type === 'holiday') return '🏖️';
+  if (info.type === 'beforeWork') return '⏰';
   if (info.type === 'lunch') return '🍱';
   return '🧑‍💻';
 }
@@ -157,54 +195,73 @@ export async function saveMoYuSettings(settings: MoYuSettings): Promise<void> {
   await AsyncStorage.setItem(MOYU_STORAGE_KEY, JSON.stringify(settings));
 }
 
-export async function fetchHolidayInfo(): Promise<HolidayInfo | null> {
+function findNextHolidayFromDays(days: HolidayDay[], now = new Date()): HolidayInfo | null {
+  const today = startOfLocalDay(now);
+  const next = days.find((day) => {
+    if (!day.isOffDay) return false;
+    const d = parseLocalDate(day.date);
+    return d.getTime() >= today.getTime();
+  });
+  if (!next) return null;
+  return { date: next.date, name: next.name };
+}
+
+async function fetchHolidayJson(year: number): Promise<HolidayDay[] | null> {
   try {
-    const res = await fetch(`${BASE_URL}/data/2026-holiday.json`);
+    const res = await fetch(`${BASE_URL}/data/${year}-holiday.json`);
+    if (!res.ok) return null;
     const data = await res.json();
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const next = (data.days || []).find((day: { date: string; isOffDay?: boolean }) => {
-      if (!day.isOffDay) return false;
-      const d = new Date(day.date);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime() >= now.getTime();
-    });
-    if (next) return { date: next.date, name: next.name };
+    return data.days || null;
   } catch {
-    /* fallback below */
+    return null;
+  }
+}
+
+export async function fetchHolidayInfo(): Promise<HolidayInfo | null> {
+  const now = new Date();
+  const year = now.getFullYear();
+
+  for (const y of [year, year + 1]) {
+    let days = await fetchHolidayJson(y);
+    if (!days && y === 2026) {
+      days = (holiday2026 as { days: HolidayDay[] }).days;
+    }
+    const next = days ? findNextHolidayFromDays(days, now) : null;
+    if (next) return next;
   }
 
   try {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const res = await fetch(`https://timor.tech/api/holiday/info/${todayStr}`);
-    const data = await res.json();
-    if (data.code === 0 && data.holiday?.holiday) {
-      return { date: todayStr, name: data.holiday.name };
-    }
     const nextRes = await fetch('https://timor.tech/api/holiday/next');
     const nextData = await nextRes.json();
-    if (nextData.holiday) {
+    if (nextData?.holiday?.date && nextData?.holiday?.name) {
       return { date: nextData.holiday.date, name: nextData.holiday.name };
     }
   } catch {
     /* ignore */
   }
 
-  return { date: '2026-05-01', name: '劳动节' };
+  return null;
 }
 
 export function formatHolidayCountdown(info: HolidayInfo, now = new Date()): string {
-  const target = new Date(info.date);
-  target.setHours(0, 0, 0, 0);
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const diffDays = Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return `今天是${info.name}，节日快乐！`;
-  if (diffDays < 0) return `今天是${info.name}，节日快乐！`;
-  if (diffDays > 0) return `距离${info.name}还有 ${diffDays} 天`;
-  const remain = target.getTime() - now.getTime();
-  if (remain <= 0) return '假期已到 🎉';
-  return `距离${info.name}还有 ${formatDuration(remain)}`;
+  const target = parseLocalDate(info.date);
+  const diffMs = target.getTime() - now.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays > 0) {
+    return `距离${info.name}还有 ${diffDays} 天`;
+  }
+
+  if (diffDays === 0 && now < target) {
+    const remain = target.getTime() - now.getTime();
+    return `距离${info.name}还有 ${formatDuration(remain)}`;
+  }
+
+  if (diffDays === 0) {
+    return `今天是${info.name}，节日快乐！`;
+  }
+
+  return '假期已到 🎉';
 }
 
 export function getGreeting(now = new Date()): string {
