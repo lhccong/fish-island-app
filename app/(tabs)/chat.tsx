@@ -249,6 +249,25 @@ const transformOnlineUsers = (users: any[]): OnlineUser[] => {
   });
 };
 
+/** 从 WebSocket 撤回广播中解析消息 ID（与 utools Chatroom.vue 一致） */
+const extractRevokeMessageId = (data: any): string | null => {
+  if (data.data) {
+    if (typeof data.data === 'object' && data.data.content != null) {
+      return String(data.data.content);
+    }
+    if (typeof data.data === 'string') {
+      return data.data;
+    }
+  }
+  if (data.content != null) {
+    return String(data.content);
+  }
+  return null;
+};
+
+const isUserMessageRevokePayload = (data: any): boolean =>
+  data?.data?.type === 'userMessageRevoke' || data?.type === 'userMessageRevoke';
+
 export default function ChatroomScreen() {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
@@ -563,6 +582,24 @@ export default function ChatroomScreen() {
     fetchOnlineUsers();
     const timer = setInterval(fetchOnlineUsers, 30000);
     return () => clearInterval(timer);
+  }, []);
+
+  // 监听 WebSocket 撤回广播（与 utools handleMessage + userMessageRevoke 一致）
+  useEffect(() => {
+    const handleWsMessage = (data: any) => {
+      if (!isUserMessageRevokePayload(data)) return;
+      const messageId = extractRevokeMessageId(data);
+      if (!messageId) return;
+      setMessages((prev) =>
+        prev.filter(
+          (msg) =>
+            String(msg.oId ?? '') !== messageId && String(msg.id ?? '') !== messageId,
+        ),
+      );
+    };
+
+    wsManager.on('message', handleWsMessage, CONNECTION_ID);
+    return () => wsManager.off('message', handleWsMessage, CONNECTION_ID);
   }, []);
 
   // 注册消息处理器
@@ -1024,9 +1061,9 @@ export default function ChatroomScreen() {
     toast.success('复读成功');
   };
 
-  const handleRevokeMessage = async (message: ChatMessage) => {
-    const oId = message.oId || message.id;
-    if (!oId) {
+  const handleRevokeMessage = (message: ChatMessage) => {
+    const messageId = message.oId || message.id;
+    if (!messageId) {
       toast.error('无法撤回该消息');
       return;
     }
@@ -1036,15 +1073,30 @@ export default function ChatroomScreen() {
       {
         text: '确定',
         style: 'destructive',
-        onPress: async () => {
+        onPress: () => {
+          if (!wsManager.isConnected(CONNECTION_ID)) {
+            toast.error('未连接，无法撤回');
+            return;
+          }
           try {
-            const response = await chatApi.revokeMessage(String(oId));
-            if (response.code === 0) {
-              setMessages((prev) => prev.filter((m) => (m.oId || m.id) !== oId));
-              toast.success('消息已撤回');
-            } else {
-              toast.error(response.msg || '撤回失败');
-            }
+            wsManager.send(
+              JSON.stringify({
+                type: 2,
+                userId: -1,
+                data: {
+                  type: 'userMessageRevoke',
+                  content: messageId,
+                },
+              }),
+              CONNECTION_ID,
+            );
+            const idStr = String(messageId);
+            setMessages((prev) =>
+              prev.filter(
+                (m) => String(m.oId ?? '') !== idStr && String(m.id ?? '') !== idStr,
+              ),
+            );
+            toast.success('消息已撤回');
           } catch (error) {
             console.error('撤回消息失败:', error);
             toast.error('撤回失败，请稍后再试');
