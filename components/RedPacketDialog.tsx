@@ -1,8 +1,8 @@
 import { chatApi } from '@/api/chat';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
-import { useUser } from '@/contexts/UserContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { redPacketTypeToApi } from '@/utils/redPacket';
 import React, { useEffect, useState } from 'react';
 import {
     Alert,
@@ -38,6 +38,13 @@ const redPacketTypes: RedPacketType[] = [
     desc: '平分红包，人人有份！',
     defaultMsg: '平分红包，人人有份！',
   },
+  {
+    name: '答题红包',
+    value: 'quiz',
+    icon: 'pencil',
+    desc: '答对题目才能抢！',
+    defaultMsg: '',
+  },
 ];
 
 interface RedPacketDialogProps {
@@ -53,10 +60,10 @@ export default function RedPacketDialog({
 }: RedPacketDialogProps) {
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
-  const { userInfo } = useUser();
 
   const [selectedType, setSelectedType] = useState('random');
   const [msg, setMsg] = useState('摸鱼者，事竟成！');
+  const [answer, setAnswer] = useState('');
   const [money, setMoney] = useState('100');
   const [count, setCount] = useState('10');
   const [isSending, setIsSending] = useState(false);
@@ -66,6 +73,7 @@ export default function RedPacketDialog({
     if (visible) {
       setSelectedType('random');
       setMsg('摸鱼者，事竟成！');
+      setAnswer('');
       setMoney('100');
       setCount('10');
     }
@@ -77,6 +85,9 @@ export default function RedPacketDialog({
     const selected = redPacketTypes.find((t) => t.value === type);
     if (selected) {
       setMsg(selected.defaultMsg);
+      if (type === 'quiz') {
+        setAnswer('');
+      }
     }
   };
 
@@ -101,20 +112,36 @@ export default function RedPacketDialog({
       return;
     }
 
+    if (selectedType === 'quiz') {
+      if (!msg.trim()) {
+        Alert.alert('提示', '请输入题目');
+        return;
+      }
+      if (!answer.trim()) {
+        Alert.alert('提示', '请输入正确答案');
+        return;
+      }
+    }
+
     setIsSending(true);
     try {
-      // 红包类型映射：random->1 (拼手气), average->2 (平分)
-      const typeMap: Record<string, number> = {
-        random: 1,
-        average: 2,
-      };
-
-      const body = {
+      const packetType = redPacketTypeToApi(selectedType);
+      const body: {
+        name: string;
+        totalAmount: number;
+        count: number;
+        type: number;
+        answer?: string;
+      } = {
         name: msg,
         totalAmount: moneyNum,
         count: countNum,
-        type: typeMap[selectedType] || 1,
+        type: packetType,
       };
+
+      if (packetType === 3 && answer.trim()) {
+        body.answer = answer.trim();
+      }
 
       const response = await chatApi.createRedPacket(body);
 
@@ -196,9 +223,11 @@ export default function RedPacketDialog({
               ))}
             </View>
 
-            {/* 祝福语 */}
+            {/* 祝福语 / 题目 */}
             <View style={styles.formItem}>
-              <Text style={[styles.label, { color: theme.icon }]}>祝福语</Text>
+              <Text style={[styles.label, { color: theme.icon }]}>
+                {selectedType === 'quiz' ? '题目' : '祝福语'}
+              </Text>
               <TextInput
                 style={[
                   styles.input,
@@ -207,10 +236,27 @@ export default function RedPacketDialog({
                 value={msg}
                 onChangeText={setMsg}
                 maxLength={20}
-                placeholder="摸鱼者，事竟成！"
+                placeholder={selectedType === 'quiz' ? '请输入题目' : '摸鱼者，事竟成！'}
                 placeholderTextColor={theme.icon}
               />
             </View>
+
+            {selectedType === 'quiz' && (
+              <View style={styles.formItem}>
+                <Text style={[styles.label, { color: theme.icon }]}>答案</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: theme.text, backgroundColor: theme.background },
+                  ]}
+                  value={answer}
+                  onChangeText={setAnswer}
+                  maxLength={50}
+                  placeholder="请输入正确答案"
+                  placeholderTextColor={theme.icon}
+                />
+              </View>
+            )}
 
             {/* 积分 */}
             <View style={styles.formItem}>
@@ -319,11 +365,12 @@ const styles = StyleSheet.create({
   },
   typeSelector: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
     marginBottom: 20,
   },
   typeCard: {
-    flex: 1,
+    width: '47%',
     padding: 12,
     borderRadius: 8,
     borderWidth: 2,

@@ -9,9 +9,13 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    ```bash
    npm install
    ```
-   build : npx eas update
+   build :
+```bash
+npx eas update
+```
+```bash
    eas build -p android --profile preview
-
+```
 2. Start the app
 
    ```bash

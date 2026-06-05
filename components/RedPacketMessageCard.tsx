@@ -2,18 +2,23 @@ import { ChatMessage } from '@/api/chat';
 import { chatApi } from '@/api/chat';
 import { toast } from '@/utils/toast';
 import {
+  formatRedPacketTypeLabel,
   getRedPacketDisplayName,
   getRedPacketRemainingCount,
   getRedPacketTotalAmount,
   getRedPacketTotalCount,
   isRedPacketFinished,
+  normalizeRedPacketType,
   parseRedPacketContent,
+  type RedPacketApiDetail,
 } from '@/utils/redPacket';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -36,6 +41,8 @@ export default function RedPacketMessageCard({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [grabbing, setGrabbing] = useState(false);
   const [grabbedAmount, setGrabbedAmount] = useState<number | null>(null);
+  const [showAnswerModal, setShowAnswerModal] = useState(false);
+  const [answerInput, setAnswerInput] = useState('');
 
   const loadDetail = useCallback(async () => {
     const redPacketId = parsed?.redPacketId;
@@ -63,15 +70,18 @@ export default function RedPacketMessageCard({
   const total = getRedPacketTotalCount(parsed, detail);
   const amount = getRedPacketTotalAmount(parsed, detail);
   const displayName = getRedPacketDisplayName(parsed, detail);
+  const packetType = normalizeRedPacketType(detail?.type ?? parsed?.type);
+  const typeLabel = formatRedPacketTypeLabel(packetType);
+  const isQuizPacket = packetType === 'quiz';
 
   const canGrab = Boolean(parsed?.redPacketId) && !finished && grabbedAmount === null && !grabbing;
 
-  const handleGrab = async () => {
-    if (!parsed?.redPacketId || grabbing || grabbedAmount !== null) return;
+  const performGrab = async (userAnswer?: string) => {
+    if (!parsed?.redPacketId) return;
 
     setGrabbing(true);
     try {
-      const response = await chatApi.grabRedPacket(parsed.redPacketId);
+      const response = await chatApi.grabRedPacket(parsed.redPacketId, userAnswer);
       if (response.code === 0 && response.data !== undefined) {
         const grabbed = Number(response.data);
         setGrabbedAmount(grabbed);
@@ -88,6 +98,28 @@ export default function RedPacketMessageCard({
     }
   };
 
+  const handleGrab = () => {
+    if (!parsed?.redPacketId || grabbing || grabbedAmount !== null) return;
+
+    if (isQuizPacket) {
+      setAnswerInput('');
+      setShowAnswerModal(true);
+      return;
+    }
+
+    performGrab();
+  };
+
+  const handleSubmitAnswer = () => {
+    const trimmed = answerInput.trim();
+    if (!trimmed) {
+      toast.error('答案不能为空');
+      return;
+    }
+    setShowAnswerModal(false);
+    performGrab(trimmed);
+  };
+
   if (!parsed) {
     return (
       <View style={styles.fallback}>
@@ -101,7 +133,7 @@ export default function RedPacketMessageCard({
       <View style={styles.contentRow}>
         <Text style={styles.icon}>🧧</Text>
         <View style={styles.info}>
-          <Text style={styles.typeLabel}>红包</Text>
+          <Text style={styles.typeLabel}>{typeLabel}</Text>
           <Text style={styles.msgText} numberOfLines={2}>
             {displayName}
           </Text>
@@ -136,7 +168,9 @@ export default function RedPacketMessageCard({
           {grabbing ? (
             <ActivityIndicator color="#ff4d4f" size="small" />
           ) : (
-            <Text style={styles.grabButtonText}>抢红包</Text>
+            <Text style={styles.grabButtonText}>
+              {isQuizPacket ? '答题抢红包' : '抢红包'}
+            </Text>
           )}
         </TouchableOpacity>
       )}
@@ -148,6 +182,45 @@ export default function RedPacketMessageCard({
       >
         <Text style={styles.viewDetailsText}>查看详情</Text>
       </TouchableOpacity>
+
+      <Modal
+        visible={showAnswerModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAnswerModal(false)}
+      >
+        <View style={styles.answerOverlay}>
+          <View style={styles.answerModal}>
+            <Text style={styles.answerTitle}>答题红包</Text>
+            <Text style={styles.answerQuestion} numberOfLines={3}>
+              {displayName}
+            </Text>
+            <TextInput
+              style={styles.answerInput}
+              value={answerInput}
+              onChangeText={setAnswerInput}
+              placeholder="请输入你的答案"
+              placeholderTextColor="#999"
+              autoFocus
+            />
+            <View style={styles.answerActions}>
+              <TouchableOpacity
+                style={styles.answerCancelBtn}
+                onPress={() => setShowAnswerModal(false)}
+              >
+                <Text style={styles.answerCancelText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.answerSubmitBtn}
+                onPress={handleSubmitAnswer}
+                disabled={grabbing}
+              >
+                <Text style={styles.answerSubmitText}>提交答案</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -268,5 +341,66 @@ const styles = StyleSheet.create({
   },
   fallbackText: {
     color: '#ff4d4f',
+  },
+  answerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  answerModal: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+  },
+  answerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  answerQuestion: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  answerInput: {
+    height: 44,
+    borderWidth: 1,
+    borderColor: '#e8e8e8',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 20,
+  },
+  answerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  answerCancelBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  answerCancelText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  answerSubmitBtn: {
+    backgroundColor: '#ff4d4f',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  answerSubmitText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
   },
 });

@@ -69,7 +69,7 @@ export interface RedPacket {
   msg: string;
   senderName: string;
   senderAvatar: string;
-  type: 'random' | 'average' | 'specify' | 'heartbeat' | 'rockPaperScissors';
+  type: 'random' | 'average' | 'quiz' | 'specify' | 'heartbeat' | 'rockPaperScissors';
   recivers?: string[];
   gesture?: number;
 }
@@ -147,9 +147,13 @@ export const chatApi = {
   },
 
   // 抢红包
-  grabRedPacket(redPacketId: string) {
+  grabRedPacket(redPacketId: string, answer?: string) {
+    const params: { redPacketId: string; answer?: string } = { redPacketId };
+    if (answer !== undefined && answer !== null && answer !== '') {
+      params.answer = answer;
+    }
     return request.instance.post('/api/redpacket/grab', null, {
-      params: { redPacketId },
+      params,
     });
   },
 

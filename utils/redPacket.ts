@@ -85,9 +85,10 @@ const normalizeRedPacket = (parsed: any): RedPacketParsed => ({
 export const normalizeRedPacketType = (type?: number | string) => {
   if (type === 1 || type === '1') return 'random';
   if (type === 2 || type === '2') return 'average';
-  if (type === 3 || type === '3') return 'specify';
+  if (type === 3 || type === '3') return 'quiz';
   if (type === 4 || type === '4') return 'heartbeat';
   if (type === 5 || type === '5') return 'rockPaperScissors';
+  if (type === 'quiz') return 'quiz';
   return String(type || 'random');
 };
 
@@ -95,11 +96,23 @@ export const redPacketTypeToApi = (type: string) => {
   const map: Record<string, number> = {
     random: 1,
     average: 2,
-    specify: 3,
+    quiz: 3,
     heartbeat: 4,
     rockPaperScissors: 5,
   };
   return map[type] || 1;
+};
+
+export const formatRedPacketTypeLabel = (type?: string) => {
+  const typeMap: Record<string, string> = {
+    random: '拼手气红包',
+    average: '平分红包',
+    quiz: '答题红包',
+    specify: '专属红包',
+    heartbeat: '心跳红包',
+    rockPaperScissors: '猜拳红包',
+  };
+  return typeMap[type || ''] || '红包';
 };
 
 export const getRedPacketDisplayName = (

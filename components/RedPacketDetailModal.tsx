@@ -92,7 +92,12 @@ export default function RedPacketDetailModal({
 
   const isLuckyKing = (receiver: any) => {
     if (!records.length) return false;
-    if (packetType === 'average' || packetType === 'specify' || packetType === 'rockPaperScissors') {
+    if (
+      packetType === 'average' ||
+      packetType === 'quiz' ||
+      packetType === 'specify' ||
+      packetType === 'rockPaperScissors'
+    ) {
       return false;
     }
 
