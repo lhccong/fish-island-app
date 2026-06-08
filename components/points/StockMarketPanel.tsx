@@ -7,7 +7,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Keyboard,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -62,6 +61,7 @@ export default function StockMarketPanel() {
   const [amountInput, setAmountInput] = useState('');
   const [sharesInput, setSharesInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const lastTradeClickRef = useRef(0);
 
   const getPositionByCode = useCallback(
@@ -109,6 +109,22 @@ export default function StockMarketPanel() {
     loadAll();
   }, [loadAll]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+
+    const showSub = Keyboard.addListener('keyboardWillShow', (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardWillHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([loadAll(), refreshUserInfo()]);
@@ -133,6 +149,7 @@ export default function StockMarketPanel() {
 
   const openTradeModal = (type: 'buy' | 'sell', index?: any, position?: any) => {
     Keyboard.dismiss();
+    setKeyboardHeight(0);
     setTradeType(type);
     setSelectedIndex(index || null);
     setSelectedPosition(position || null);
@@ -532,13 +549,16 @@ export default function StockMarketPanel() {
         presentationStyle="overFullScreen"
         onRequestClose={() => setTradeVisible(false)}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
+        <View style={styles.modalOverlay}>
           <Pressable style={styles.modalBackdrop} onPress={() => setTradeVisible(false)} />
           <Pressable
-            style={[styles.modalCard, { backgroundColor: theme.card }]}
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: theme.card,
+                marginBottom: Platform.OS === 'ios' ? keyboardHeight : 0,
+              },
+            ]}
             onPress={(e) => e.stopPropagation()}
           >
             <Text style={[styles.modalTitle, { color: theme.text }]}>
@@ -616,7 +636,7 @@ export default function StockMarketPanel() {
               </TouchableOpacity>
             </View>
           </Pressable>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
     </View>
   );
