@@ -6,7 +6,11 @@ import { toast } from '@/utils/toast';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -128,6 +132,7 @@ export default function StockMarketPanel() {
   }, [positions]);
 
   const openTradeModal = (type: 'buy' | 'sell', index?: any, position?: any) => {
+    Keyboard.dismiss();
     setTradeType(type);
     setSelectedIndex(index || null);
     setSelectedPosition(position || null);
@@ -524,10 +529,18 @@ export default function StockMarketPanel() {
         visible={tradeVisible}
         transparent
         animationType="slide"
+        presentationStyle="overFullScreen"
         onRequestClose={() => setTradeVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: theme.card }]}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={() => setTradeVisible(false)} />
+          <Pressable
+            style={[styles.modalCard, { backgroundColor: theme.card }]}
+            onPress={(e) => e.stopPropagation()}
+          >
             <Text style={[styles.modalTitle, { color: theme.text }]}>
               {tradeType === 'buy' ? '买入指数' : '卖出指数'}
             </Text>
@@ -602,8 +615,8 @@ export default function StockMarketPanel() {
                 )}
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -723,7 +736,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
   },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
   modalCard: { borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20 },
   modalTitle: { fontSize: 17, fontWeight: '700', marginBottom: 4 },
   tradeIndexName: { fontSize: 16, fontWeight: '600' },
