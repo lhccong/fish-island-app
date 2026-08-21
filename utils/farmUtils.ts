@@ -4,6 +4,14 @@ export const GRID_COLS = 6;
 export const GRID_ROWS = 4;
 export const TOTAL_LANDS = GRID_COLS * GRID_ROWS;
 
+/** 第 9–12 块地解锁消耗可用积分（与后端一致；优先用接口返回的 unlockCost） */
+export const LAND_UNLOCK_COST: Record<number, number> = {
+  9: 100,
+  10: 400,
+  11: 1000,
+  12: 2000,
+};
+
 export const FARM_HARVEST_ICON = 'https://oss.cqbo.com/moyu/farm/toucai.png';
 
 export const LAND_STATUS = {
@@ -79,6 +87,26 @@ export function mergeLandUpdates(prev: LandDTO[], updates: LandDTO[]): LandDTO[]
 export function isLandUnlocked(land: LandDTO | null | undefined): boolean {
   if (!land?.id) return false;
   return land.locked !== 1;
+}
+
+/** 获取地块解锁消耗（优先用后端返回的 unlockCost） */
+export function getLandUnlockCost(land: LandDTO | null | undefined, landIndex: number): number | null {
+  if (land?.unlockCost != null) return land.unlockCost;
+  return LAND_UNLOCK_COST[landIndex] ?? null;
+}
+
+/** 下一块可尝试解锁的地块信息 */
+export function getNextUnlockable(
+  landGrid: (LandDTO | null)[],
+): { land: LandDTO; landIndex: number; arrayIndex: number; cost: number } | null {
+  const unlockedCount = landGrid.filter(isLandUnlocked).length;
+  if (unlockedCount >= TOTAL_LANDS) return null;
+  const arrayIndex = unlockedCount;
+  const land = landGrid[arrayIndex];
+  const landIndex = arrayIndex + 1;
+  const cost = getLandUnlockCost(land, landIndex);
+  if (!land?.id || cost == null) return null;
+  return { land, landIndex, arrayIndex, cost };
 }
 
 export function isLandEmpty(land: LandDTO | null | undefined): boolean {

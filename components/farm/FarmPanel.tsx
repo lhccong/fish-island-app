@@ -30,6 +30,8 @@ import {
   GRID_ROWS,
   canStealOnFriendLand,
   getFriendUserId,
+  getLandUnlockCost,
+  getNextUnlockable,
   isFriendLandPlot,
   isLandEmpty,
   isLandMature,
@@ -50,6 +52,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -115,6 +118,11 @@ export default function FarmPanel() {
 
   const landGrid = useMemo(() => buildLandGrid(activeLands), [activeLands]);
   const unlockedCount = useMemo(() => landGrid.filter(isLandUnlocked).length, [landGrid]);
+
+  const nextUnlockable = useMemo(
+    () => (!isVisitingFriend ? getNextUnlockable(landGrid) : null),
+    [landGrid, isVisitingFriend],
+  );
 
   const cropMap = useMemo(() => {
     const map = new Map<number, CropDTO>();
@@ -315,6 +323,69 @@ export default function FarmPanel() {
     }
   };
 
+  const handleUnlockLand = (land: LandDTO | null, landIndex: number) => {
+    if (!land?.id) {
+      toast.warning('地块信息异常，请刷新后重试');
+      return;
+    }
+    const cost = getLandUnlockCost(land, landIndex);
+    if (cost == null) {
+      toast.info(`第 ${landIndex} 块地暂不可解锁`);
+      return;
+    }
+    const needLevel = land.unlockLevel;
+    const farmLevel = farmUser?.level ?? 1;
+    if (needLevel != null && farmLevel < needLevel) {
+      toast.info(
+        `需农场等级 Lv.${needLevel} 才能解锁第 ${landIndex} 块地（当前 Lv.${farmLevel}）`,
+      );
+      return;
+    }
+    if (availablePoints < cost) {
+      toast.warning(
+        `积分不足，解锁第 ${landIndex} 块地需要 ${cost} 可用积分（当前 ${availablePoints}）`,
+      );
+      return;
+    }
+
+    Alert.alert(
+      `解锁第 ${landIndex} 块地`,
+      needLevel != null
+        ? `确认消耗 ${cost} 可用积分解锁？需农场等级 Lv.${needLevel}。`
+        : `确认消耗 ${cost} 可用积分解锁该地块？`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '解锁',
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              const res = await farmApi.unlock(land.id!);
+              if (res.code === 0) {
+                toast.success(`第 ${landIndex} 块地解锁成功！`);
+                if (res.data) {
+                  setLands((prev) => mergeLandUpdates(prev, [res.data!]));
+                }
+                const refreshed = await refreshLandsAndFarmUser();
+                if (!refreshed && !res.data) {
+                  await loadFarmData();
+                }
+                await refreshUserInfo();
+              } else {
+                toast.error(res.msg || res.message || '解锁失败');
+              }
+            } catch (e) {
+              toast.error('解锁失败');
+              console.error(e);
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const handlePlant = async (cropId: number) => {
     if (selectedLandIds.length === 0) return;
     setActionLoading(true);
@@ -352,7 +423,12 @@ export default function FarmPanel() {
       if (landIndex > 1 && !isLandUnlocked(landGrid[arrayIndex - 1])) {
         toast.info('土地按顺序解锁，请先解锁前一块地');
       } else {
-        toast.info(`第 ${landIndex} 块地尚未解锁，升级农场后可开垦`);
+        // 只有 nextUnlockable 地块才能触发解锁
+        if (nextUnlockable && arrayIndex === nextUnlockable.arrayIndex) {
+          handleUnlockLand(land, landIndex);
+        } else {
+          toast.info(`第 ${landIndex} 块地尚未解锁`);
+        }
       }
       return;
     }
@@ -753,6 +829,7 @@ export default function FarmPanel() {
                               land={land}
                               arrayIndex={arrayIndex}
                               unlockedCount={unlockedCount}
+                              nextUnlockable={nextUnlockable}
                               now={now}
                               crop={getCrop(land)}
                               tileSize={tileSize}

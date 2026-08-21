@@ -87,8 +87,10 @@ export default function MomentsScreen() {
   const isAdmin = userInfo?.userRole === 'admin';
 
   // user filter state
-  const [filterUserId, setFilterUserId] = useState<number | null>(null);
+  const [filterUserId, setFilterUserId] = useState<string | number | null>(null);
   const [filterUserName, setFilterUserName] = useState<string>('');
+  const [viewingSelf, setViewingSelf] = useState(false);
+  const [loginUserExtra, setLoginUserExtra] = useState<UserProfileSnapshot | null>(null);
   const [profileUser, setProfileUser] = useState<UserProfileSnapshot | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
@@ -104,19 +106,23 @@ export default function MomentsScreen() {
     } catch {}
   }, []);
 
-  const fetchMoments = useCallback(async (p: number, isRefresh = false, userId?: number) => {
+  const fetchMoments = useCallback(async (p: number, isRefresh = false, userId?: string | number) => {
     if (p === 1) { isRefresh ? setRefreshing(true) : setLoading(true); }
     else { setLoadingMore(true); }
     setError(null);
     try {
-      const res = await momentsApi.listMoments({
+      const params = {
         current: p, pageSize: PAGE_SIZE, sortField: 'createTime', sortOrder: 'descend',
         ...(userId != null ? { userId } : {}),
-      });
+      };
+      console.log('[fetchMoments] 请求参数:', JSON.stringify(params));
+      const res = await momentsApi.listMoments(params);
+      console.log('[fetchMoments] 响应:', JSON.stringify(res));
       if (res.code === 0 && res.data) {
         const records = (res.data.records || []).sort(
           (a, b) => (b.isTop || 0) - (a.isTop || 0),
         );
+        console.log('[fetchMoments] 获取到动态数:', records.length, '总数据:', res.data.total);
         setMoments(prev => p === 1 ? records : [...prev, ...records]);
         setPage(p);
         setHasMore(p * PAGE_SIZE < (res.data.total || 0));
@@ -124,11 +130,12 @@ export default function MomentsScreen() {
         records.forEach(m => { if (m.commentNum > 0) loadComments(m.id); });
       } else {
         // non-zero code — stop loading, show empty list
+        console.log('[fetchMoments] 非成功响应:', res.code, res.message);
         if (p === 1) setMoments([]);
         setHasMore(false);
       }
     } catch (e: any) {
-      console.error(e);
+      console.error('[fetchMoments] 错误:', e);
       setError(e?.message || '加载失败');
       if (p === 1) setMoments([]);
       setHasMore(false);
@@ -141,15 +148,41 @@ export default function MomentsScreen() {
 
   useEffect(() => { fetchMoments(1); }, []);
 
-  const loadProfileUser = useCallback(async (userId: number) => {
+  const loadProfileUser = useCallback(async (userId: string | number) => {
     setProfileLoading(true);
     setIsFollowing(false);
+    const isViewingSelf = String(userId) === meId;
     try {
       const res = await userApi.getUserVoById(userId);
       if (res.code === 0 && res.data) {
-        setProfileUser(res.data as UserProfileSnapshot);
+        const userData = res.data as UserProfileSnapshot;
+        setProfileUser(userData);
+        // 如果是查看自己，同时更新 loginUserExtra
+        if (isViewingSelf) {
+          setLoginUserExtra(userData);
+        }
       } else {
-        setProfileUser({ id: userId, userName: filterUserName });
+        // API 返回非成功码，尝试使用当前用户信息作为后备
+        if (isViewingSelf && userInfo) {
+          const fallbackData = {
+            id: userInfo.id,
+            userId: userInfo.id,
+            userName: userInfo.userName,
+            userNickname: userInfo.userNickname,
+            userAvatar: userInfo.userAvatar,
+            avatarFramerUrl: userInfo.avatarFramerUrl,
+            level: userInfo.level,
+            points: userInfo.points ?? userInfo.userPoint,
+            vip: userInfo.vip,
+            followerCount: userInfo.followerCount,
+            followingCount: userInfo.followingUserCount,
+            momentsBgUrl: userInfo.momentsBgUrl,
+          };
+          setProfileUser(fallbackData);
+          setLoginUserExtra(fallbackData);
+        } else {
+          setProfileUser({ id: userId, userName: filterUserName });
+        }
       }
       if (isLoggedIn && String(userId) !== meId) {
         const followRes = await followApi.isFollowing(userId);
@@ -157,11 +190,31 @@ export default function MomentsScreen() {
         setIsFollowing(!!(data === true || (followRes.code === 0 && data)));
       }
     } catch {
-      setProfileUser({ id: userId, userName: filterUserName });
+      // 网络错误时，也尝试使用当前用户信息作为后备
+      if (isViewingSelf && userInfo) {
+        const fallbackData = {
+          id: userInfo.id,
+          userId: userInfo.id,
+          userName: userInfo.userName,
+          userNickname: userInfo.userNickname,
+          userAvatar: userInfo.userAvatar,
+          avatarFramerUrl: userInfo.avatarFramerUrl,
+          level: userInfo.level,
+          points: userInfo.points ?? userInfo.userPoint,
+          vip: userInfo.vip,
+          followerCount: userInfo.followerCount,
+          followingCount: userInfo.followingUserCount,
+          momentsBgUrl: userInfo.momentsBgUrl,
+        };
+        setProfileUser(fallbackData);
+        setLoginUserExtra(fallbackData);
+      } else {
+        setProfileUser({ id: userId, userName: filterUserName });
+      }
     } finally {
       setProfileLoading(false);
     }
-  }, [filterUserName, isLoggedIn, meId]);
+  }, [filterUserName, isLoggedIn, meId, userInfo]);
 
   useEffect(() => {
     if (filterUserId == null) {
@@ -180,29 +233,37 @@ export default function MomentsScreen() {
     appliedRouteFilterRef.current = rawId;
     const userName =
       typeof params.filterUserName === 'string' ? params.filterUserName : '';
+    const isViewingSelf = String(userId) === meId;
+    setViewingSelf(isViewingSelf);
     setFilterUserId(userId);
     setFilterUserName(userName);
+    setProfileUser(null);
+    setIsFollowing(false);
     setMoments([]);
     setCommentsMap({});
     setPage(1);
     setHasMore(true);
     setError(null);
     fetchMoments(1, false, userId);
-  }, [params.filterUserId, params.filterUserName, fetchMoments]);
+  }, [params.filterUserId, params.filterUserName, fetchMoments, meId]);
 
   const onRefresh = useCallback(() => fetchMoments(1, true, filterUserId ?? undefined), [fetchMoments, filterUserId]);
   const onEndReached = useCallback(() => { if (!loadingMore && hasMore) fetchMoments(page + 1, false, filterUserId ?? undefined); }, [loadingMore, hasMore, page, fetchMoments, filterUserId]);
 
   const handleAvatarPress = useCallback((userId: number, userName: string) => {
+    const isViewingSelf = String(userId) === meId;
+    setViewingSelf(isViewingSelf);
     setFilterUserId(userId);
     setFilterUserName(userName);
+    setProfileUser(null);
+    setIsFollowing(false);
     setMoments([]);
     setCommentsMap({});
     setPage(1);
     setHasMore(true);
     setError(null);
     fetchMoments(1, false, userId);
-  }, [fetchMoments]);
+  }, [fetchMoments, meId]);
 
   const handleToggleFollow = useCallback(async () => {
     if (!filterUserId || !isLoggedIn || String(filterUserId) === meId) return;
@@ -235,6 +296,7 @@ export default function MomentsScreen() {
   const handleBack = useCallback(() => {
     setFilterUserId(null);
     setFilterUserName('');
+    setViewingSelf(false);
     setProfileUser(null);
     setIsFollowing(false);
     setMoments([]);
@@ -410,13 +472,55 @@ export default function MomentsScreen() {
     ]);
   }, []);
 
-  const handleViewSelf = useCallback(() => {
+  const loadLoginUserExtra = useCallback(async () => {
+    if (!isLoggedIn) return;
+    try {
+      const res = await userApi.getCurrentUser();
+      if (res?.code === 0 && res.data) {
+        setLoginUserExtra(res.data as UserProfileSnapshot);
+      }
+    } catch {}
+  }, [isLoggedIn]);
+
+  const handleViewSelf = useCallback(async () => {
     if (!userInfo?.id) {
       Alert.alert('提示', '请先登录');
       return;
     }
-    handleAvatarPress(Number(userInfo.id), userInfo.userName || '我');
-  }, [userInfo, handleAvatarPress]);
+    // 参照 utools：如果已经在查看自己，直接返回避免重复请求
+    if (viewingSelf) return;
+    const targetUserId = userInfo.id;
+    // 参照 utools：立即设置状态，无需等待 API
+    setViewingSelf(true);
+    setProfileUser(null);
+    setIsFollowing(false);
+    setMoments([]);
+    setCommentsMap({});
+    setPage(1);
+    setHasMore(true);
+    setError(null);
+    setFilterUserId(targetUserId);
+    setFilterUserName(userInfo.userName || '');
+    // 先用 userInfo 作为后备显示
+    console.log('[handleViewSelf] userInfo.id:', userInfo.id, 'targetUserId:', targetUserId);
+    setLoginUserExtra({
+      id: userInfo.id,
+      userId: userInfo.id,
+      userName: userInfo.userName,
+      userNickname: userInfo.userNickname,
+      userAvatar: userInfo.userAvatar,
+      avatarFramerUrl: userInfo.avatarFramerUrl,
+      level: userInfo.level,
+      points: userInfo.points ?? userInfo.userPoint,
+      vip: userInfo.vip,
+      followerCount: userInfo.followerCount,
+      followingCount: userInfo.followingUserCount,
+      momentsBgUrl: userInfo.momentsBgUrl,
+    });
+    // 异步获取最新数据，使用明确的 userId 参数
+    fetchMoments(1, false, targetUserId);
+    // 注意：不需要重复调用 loadLoginUserExtra，因为上面已经设置了 loginUserExtra
+  }, [userInfo, viewingSelf, fetchMoments]);
 
   const handleStartLottery = useCallback(async () => {
     if (!lotteryMomentId) return;
@@ -594,20 +698,52 @@ export default function MomentsScreen() {
   const s = screenStyles(theme);
 
   const viewingOtherUser =
-    filterUserId != null && isLoggedIn && String(filterUserId) !== meId;
+    filterUserId != null && isLoggedIn && String(filterUserId) !== meId && !viewingSelf;
   const viewingProfile = filterUserId != null;
-  const coverDisplayName =
-    profileUser?.userName || profileUser?.userNickname || filterUserName || '用户';
-  const coverAvatar = pickUserAvatar(profileUser);
-  const coverBg = profileUser?.momentsBgUrl
-    ? resolveAvatarUrl(profileUser.momentsBgUrl)
-    : null;
-  const coverFollowingCount =
-    profileUser?.followingCount ?? profileUser?.followingUserCount;
+
+  // 参照 utools 的 coverProfileUser 计算逻辑
+  const coverProfileUser = viewingSelf
+    ? (loginUserExtra || profileUser || (userInfo ? {
+        id: userInfo.id,
+        userId: userInfo.id,
+        userName: userInfo.userName,
+        userNickname: userInfo.userNickname,
+        userAvatar: userInfo.userAvatar,
+        avatarFramerUrl: userInfo.avatarFramerUrl,
+        level: userInfo.level,
+        points: userInfo.points ?? userInfo.userPoint,
+        vip: userInfo.vip,
+        followerCount: userInfo.followerCount,
+        followingCount: userInfo.followingUserCount,
+        momentsBgUrl: userInfo.momentsBgUrl,
+      } : null))
+    : profileUser;
+
+  const currentDisplayName = viewingSelf
+    ? (loginUserExtra?.userName || profileUser?.userName || userInfo?.userName || filterUserName || '用户')
+    : (profileUser?.userName || profileUser?.userNickname || filterUserName || '用户');
+
+  const coverDisplayName = viewingSelf
+    ? (loginUserExtra?.userName || profileUser?.userName || userInfo?.userName || filterUserName || '用户')
+    : (profileUser?.userName || profileUser?.userNickname || filterUserName || '用户');
+
+  const coverAvatar = viewingSelf
+    ? (loginUserExtra ? pickUserAvatar(loginUserExtra) : (profileUser ? pickUserAvatar(profileUser) : (userInfo ? pickUserAvatar({
+        userAvatar: userInfo.userAvatar,
+        avatarFramerUrl: userInfo.avatarFramerUrl,
+      } as UserProfileSnapshot) : '')))
+    : pickUserAvatar(profileUser);
+
+  const coverBg = viewingSelf
+    ? (loginUserExtra?.momentsBgUrl ? resolveAvatarUrl(loginUserExtra.momentsBgUrl) : (userInfo?.momentsBgUrl ? resolveAvatarUrl(userInfo.momentsBgUrl) : null))
+    : (profileUser?.momentsBgUrl ? resolveAvatarUrl(profileUser.momentsBgUrl) : null);
+
+  const coverFollowingCount = coverProfileUser?.followingCount ?? coverProfileUser?.followingUserCount;
 
   const renderCoverHeader = () => {
     if (!viewingProfile) return null;
     const followLabel = isFollowing ? '✓ 已关注' : '+ 关注';
+    const displayProfile = viewingSelf ? coverProfileUser : profileUser;
     return (
       <View style={s.coverWrap}>
         <View style={s.coverBg}>
@@ -640,22 +776,20 @@ export default function MomentsScreen() {
               )}
             </TouchableOpacity>
           ) : null}
-          {profileUser ? (
+          {displayProfile || profileLoading ? (
             <View style={s.coverStats}>
               <Text style={s.coverStatText}>
                 <Text style={s.coverStatNum}>{coverFollowingCount ?? '-'}</Text> 关注
               </Text>
               <View style={s.coverStatDivider} />
               <Text style={s.coverStatText}>
-                <Text style={s.coverStatNum}>{profileUser.followerCount ?? '-'}</Text> 粉丝
+                <Text style={s.coverStatNum}>{displayProfile?.followerCount ?? '-'}</Text> 粉丝
               </Text>
             </View>
-          ) : profileLoading ? (
-            <ActivityIndicator color="#fff" size="small" style={{ marginBottom: 8 }} />
           ) : null}
           <Pressable
             onPress={() => {
-              if (viewingOtherUser && profileUser) setUserDetailVisible(true);
+              if (viewingOtherUser && displayProfile) setUserDetailVisible(true);
             }}
           >
             <ExpoImage source={{ uri: coverAvatar }} style={s.coverAvatar} contentFit="cover" />

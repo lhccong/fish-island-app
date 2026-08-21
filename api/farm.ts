@@ -22,6 +22,10 @@ export interface LandDTO {
   harvestTime?: string;
   plantedTime?: string;
   canSteal?: boolean;
+  /** 解锁消耗积分（后端返回） */
+  unlockCost?: number;
+  /** 解锁所需农场等级 */
+  unlockLevel?: number;
 }
 
 export interface CropDTO {
@@ -108,6 +112,11 @@ export const farmApi = {
 
   harvest(landIds: number[]): Promise<ApiResponse<LandDTO[]>> {
     return request.post('/api/land/harvest', { landIds });
+  },
+
+  /** 解锁地块（开辟新土地）POST /api/land/unlock */
+  unlock(landId: number): Promise<ApiResponse<LandDTO>> {
+    return request.post('/api/land/unlock', { landId });
   },
 
   getMyStolenRecords(): Promise<ApiResponse<FarmStealRecordVO[]>> {

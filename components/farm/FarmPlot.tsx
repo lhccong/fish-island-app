@@ -3,7 +3,7 @@ import CropIcon from '@/components/farm/CropIcon';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { FARM_LAND } from '@/constants/farmTheme';
 import { formatCountdownCompact } from '@/utils/farmLayout';
-import { isLandMature, isLandUnlocked, LAND_STATUS } from '@/utils/farmUtils';
+import { getLandUnlockCost, isLandMature, isLandUnlocked, LAND_STATUS, toLandIndex } from '@/utils/farmUtils';
 import React, { useEffect, useRef } from 'react';
 import {
   Animated,
@@ -18,6 +18,7 @@ export interface FarmPlotProps {
   land: LandDTO | null;
   arrayIndex: number;
   unlockedCount: number;
+  nextUnlockable: { landIndex: number; arrayIndex: number; cost: number } | null;
   now: number;
   crop?: CropDTO;
   tileSize: number;
@@ -36,6 +37,7 @@ export default function FarmPlot({
   land,
   arrayIndex,
   unlockedCount,
+  nextUnlockable,
   now,
   crop,
   tileSize,
@@ -48,7 +50,7 @@ export default function FarmPlot({
   const canSteal = friendMode && mature && land?.canSteal === true;
   const growing =
     unlocked && land?.status === LAND_STATUS.GROWING && land != null && !mature;
-  const isNextUnlock = !unlocked && arrayIndex === unlockedCount;
+  const isNextUnlock = !unlocked && nextUnlockable != null && arrayIndex === nextUnlockable.arrayIndex;
 
   const floatAnim = useRef(new Animated.Value(0)).current;
   const sparkleAnim = useRef(new Animated.Value(0.35)).current;
@@ -89,11 +91,13 @@ export default function FarmPlot({
   const labelFont = Math.max(9, Math.round(tileSize * 0.19));
   const lockIconSize = Math.max(14, Math.round(tileSize * 0.26));
 
+  // 解锁费用和等级显示
+  const unlockCost = isNextUnlock ? getLandUnlockCost(land, toLandIndex(arrayIndex)) : null;
+  const needLevel = land?.unlockLevel;
+
   const tileFilter: ViewStyle | undefined = !unlocked
-    ? { opacity: 0.88 }
-    : isNextUnlock
-      ? { opacity: 1.05 }
-      : undefined;
+    ? { opacity: isNextUnlock ? 1.0 : 0.88 }
+    : undefined;
 
   const surfaceStyle: ViewStyle[] = [styles.tileSurface];
   const moundStyle: ViewStyle[] = [styles.mound];
@@ -116,9 +120,9 @@ export default function FarmPlot({
       <Pressable
         style={({ pressed }) => [
           styles.plot,
-          pressed && unlocked && !disabled && styles.plotPressed,
+          pressed && !(!unlocked && !isNextUnlock) && !disabled && styles.plotPressed,
         ]}
-        disabled={!unlocked || disabled}
+        disabled={disabled || (!unlocked && !isNextUnlock)}
         onPress={onPress}
       >
         <View style={[styles.soil, tileFilter]}>
@@ -127,11 +131,24 @@ export default function FarmPlot({
         </View>
 
         {!unlocked ? (
-          <View style={styles.overlayLocked}>
-            <IconSymbol name="lock.fill" size={lockIconSize} color="#fff" />
-            <Text style={[styles.lockText, { fontSize: labelFont }]} numberOfLines={1}>
-              未解锁
-            </Text>
+          <View style={[styles.overlayLocked, isNextUnlock && styles.overlayUnlockable]}>
+            <IconSymbol name="lock.fill" size={lockIconSize} color={isNextUnlock ? '#ffd700' : '#fff'} />
+            {isNextUnlock && unlockCost != null ? (
+              <>
+                <Text style={[styles.lockText, styles.lockTextCost, { fontSize: labelFont }]} numberOfLines={1}>
+                  {unlockCost}积分解锁
+                </Text>
+                {needLevel != null && (
+                  <Text style={[styles.lockLevelText, { fontSize: Math.max(7, labelFont - 2) }]} numberOfLines={1}>
+                    Lv.{needLevel}
+                  </Text>
+                )}
+              </>
+            ) : (
+              <Text style={[styles.lockText, { fontSize: labelFont }]} numberOfLines={1}>
+                未解锁
+              </Text>
+            )}
           </View>
         ) : mature ? (
           <View style={styles.overlay}>
@@ -252,7 +269,24 @@ const styles = StyleSheet.create({
     zIndex: 3,
     top: '8%',
   },
+  overlayUnlockable: {
+    top: '4%',
+  },
   lockText: {
+    fontWeight: '700',
+    color: '#fff',
+    backgroundColor: 'rgba(90, 60, 40, 0.85)',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  lockTextCost: {
+    backgroundColor: 'rgba(180, 100, 0, 0.9)',
+    color: '#ffd700',
+    fontWeight: '800',
+  },
+  lockLevelText: {
     fontWeight: '700',
     color: '#fff',
     backgroundColor: 'rgba(90, 60, 40, 0.85)',
