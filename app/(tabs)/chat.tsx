@@ -302,10 +302,17 @@ export default function ChatroomScreen() {
   const pendingScrollToBottomRef = useRef(false);
   const isLoadingMoreRef = useRef(false);
   const currentPageRef = useRef(1);
+  // 记录最后一条消息的渲染高度，用于检测图片异步加载等引起的高度变化
+  const lastMessageHeightRef = useRef<number | null>(null);
 
   const [listOpacity, setListOpacity] = useState(1);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
+  // 标记键盘是否正在动画/可见，用于在键盘动画期间忽略 onScroll 的抖动
+  const isKeyboardAnimatingRef = useRef(false);
+  // 标记滚动是否由程序触发（scrollToBottom/scrollToEnd），用于忽略后续 onScroll 回调
+  const isProgrammaticScrollRef = useRef(false);
+  const lastProgrammaticScrollAtRef = useRef(0);
 
   // 引用消息状态
   const [quotedMessage, setQuotedMessage] = useState<ChatMessage | null>(null);
@@ -384,9 +391,17 @@ export default function ChatroomScreen() {
       cancelAnimationFrame(scrollToBottomRafRef.current);
     }
 
+    // 标记本次滚动是程序触发的，忽略紧随其后的 onScroll 抖动
+    isProgrammaticScrollRef.current = true;
+    lastProgrammaticScrollAtRef.current = Date.now();
+
     scrollToBottomRafRef.current = requestAnimationFrame(() => {
       scrollToBottomRafRef.current = null;
       flatListRef.current?.scrollToEnd({ animated: false });
+      // 滚动结束后，延迟清除标记，覆盖 iOS/Android 后续的 layout-driven onScroll 抖动
+      setTimeout(() => {
+        isProgrammaticScrollRef.current = false;
+      }, 250);
     });
   }, []);
 
@@ -409,8 +424,13 @@ export default function ChatroomScreen() {
     keyboardScrollTimeoutRef.current = setTimeout(() => {
       keyboardScrollTimeoutRef.current = null;
       if (isAtBottomRef.current) {
+        // 强制保持为底部状态，避免键盘动画期间 onScroll 抖动把 isAtBottom 设回 false
+        isProgrammaticScrollRef.current = true;
         flatListRef.current?.scrollToEnd({ animated: false });
         pendingScrollToBottomRef.current = false;
+        setTimeout(() => {
+          isProgrammaticScrollRef.current = false;
+        }, 100);
       }
     }, Platform.OS === 'ios' ? 300 : 120);
   }, [scrollToBottom]);
@@ -437,6 +457,7 @@ export default function ChatroomScreen() {
     };
 
     const frameSub = Keyboard.addListener(frameEvent, (event: KeyboardEvent) => {
+      isKeyboardAnimatingRef.current = event.endCoordinates.height > 0;
       applyKeyboardFrame(event.endCoordinates.screenY);
       if (event.endCoordinates.height > 0) {
         scrollToBottomIfNeeded();
@@ -444,12 +465,27 @@ export default function ChatroomScreen() {
     });
 
     const showSub = Keyboard.addListener(showEvent, (event: KeyboardEvent) => {
+      isKeyboardAnimatingRef.current = true;
+      isProgrammaticScrollRef.current = true;
+      lastProgrammaticScrollAtRef.current = Date.now();
       applyKeyboardFrame(event.endCoordinates.screenY);
       dismissInputPopups();
       scrollToBottomIfNeeded();
+      // 键盘完全弹起后解除标记
+      setTimeout(() => {
+        isKeyboardAnimatingRef.current = false;
+        isProgrammaticScrollRef.current = false;
+      }, Platform.OS === 'ios' ? 350 : 180);
     });
 
     const hideSub = Keyboard.addListener(hideEvent, () => {
+      // 键盘收起时也保持一段时间的程序滚动标记，避免布局缩回时的 onScroll 抖动
+      isProgrammaticScrollRef.current = true;
+      lastProgrammaticScrollAtRef.current = Date.now();
+      setTimeout(() => {
+        isProgrammaticScrollRef.current = false;
+      }, Platform.OS === 'ios' ? 350 : 180);
+      isKeyboardAnimatingRef.current = false;
       if (Platform.OS === 'android') {
         applyKeyboardFrame(windowHeight);
       }
@@ -535,10 +571,17 @@ export default function ChatroomScreen() {
       isAtBottomRef.current = true;
       setIsAtBottom(true);
       setNewMessageCount(0);
+      // 重置最后一条消息的高度记录，进入页面后会被新消息触发更新
+      lastMessageHeightRef.current = null;
       connectWebSocket();
       // 已有消息时先滚到底部，避免等待接口返回期间仍停在旧位置
+      isProgrammaticScrollRef.current = true;
+      lastProgrammaticScrollAtRef.current = Date.now();
       requestAnimationFrame(() => {
         flatListRef.current?.scrollToEnd({ animated: false });
+        setTimeout(() => {
+          isProgrammaticScrollRef.current = false;
+        }, 300);
       });
       loadMessages();
       return () => {
@@ -628,10 +671,29 @@ export default function ChatroomScreen() {
         // 用 requestAnimationFrame 等待本次渲染完成后再滚动（参考 utools nextTick + requestAnimationFrame）
         requestAnimationFrame(() => {
           if (wasAtBottom || isSelf) {
+            // 标记为程序触发的滚动，避免 onScroll 回调误判 isAtBottom
+            isProgrammaticScrollRef.current = true;
+            lastProgrammaticScrollAtRef.current = Date.now();
             pendingScrollToBottomRef.current = true;
             flatListRef.current?.scrollToEnd({ animated: false });
             setNewMessageCount(0);
             lastMessageCountRef.current = 0;
+            // 250ms 内的 layout-driven onScroll 抖动都忽略
+            setTimeout(() => {
+              isProgrammaticScrollRef.current = false;
+            }, 250);
+            // 500ms 后再补一次滚到底（图片消息可能刚插入但图片还未加载，
+            // 实测 onContentSizeChange 也能触发，但加这一层更稳）
+            setTimeout(() => {
+              if (isAtBottomRef.current) {
+                isProgrammaticScrollRef.current = true;
+                lastProgrammaticScrollAtRef.current = Date.now();
+                flatListRef.current?.scrollToEnd({ animated: false });
+                setTimeout(() => {
+                  isProgrammaticScrollRef.current = false;
+                }, 250);
+              }
+            }, 500);
           } else {
             // 不在底部：累加新消息数，显示提示按钮
             setNewMessageCount((prev) => {
@@ -662,6 +724,25 @@ export default function ChatroomScreen() {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceToBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
     const atBottom = distanceToBottom < 50;
+
+    // 键盘动画期间或刚执行过程序触发的滚动：忽略 onScroll 抖动，保持当前 isAtBottom 状态
+    // 这样可以避免下面问题：
+    //   1) 键盘弹起时 marginBottom 变小，使 layoutMeasurement 突然变小，距离突变被误判为不在底部
+    //   2) scrollToEnd 之后的 layout-driven onScroll 抖动
+    const now = Date.now();
+    const sinceProgrammaticScroll = now - lastProgrammaticScrollAtRef.current;
+    if (
+      isKeyboardAnimatingRef.current ||
+      isProgrammaticScrollRef.current ||
+      sinceProgrammaticScroll < 300
+    ) {
+      // 仍然处理加载更多历史消息
+      if (contentOffset.y <= 0 && !isLoadingMoreRef.current && hasMoreMessages) {
+        loadMessages(currentPageRef.current + 1);
+      }
+      return;
+    }
+
     setIsAtBottom(atBottom);
     isAtBottomRef.current = atBottom;
 
@@ -1481,8 +1562,43 @@ export default function ChatroomScreen() {
     const hasQuotedMessage = item.quotedMessage || (item.rawMessage?.quotedMessage);
     const quoted = item.quotedMessage || item.rawMessage?.quotedMessage;
 
+    // 追踪最后一条消息渲染高度变化（图片异步加载会导致高度变化）
+    const isLastMessage =
+      messages.length > 0 &&
+      messages[messages.length - 1].oId === item.oId;
+    // 仅对最后一条且是图片消息时追踪高度变化，避免对其它消息造成 scroll 抖动
+    const isTrackedLastMessage = isLastMessage && isImageMsg;
+
     return (
-      <View style={[styles.messageRow, isSelf && styles.messageRowSelf]}>
+      <View
+        style={[styles.messageRow, isSelf && styles.messageRowSelf]}
+        onLayout={
+          isTrackedLastMessage
+            ? (e) => {
+                const newHeight = e.nativeEvent.layout.height;
+                if (
+                  lastMessageHeightRef.current != null &&
+                  Math.abs(newHeight - lastMessageHeightRef.current) > 1
+                ) {
+                  // 最后一条消息高度变化（图片加载完成等），如果当前在底部则再次滚到底
+                  lastMessageHeightRef.current = newHeight;
+                  if (isAtBottomRef.current) {
+                    isProgrammaticScrollRef.current = true;
+                    lastProgrammaticScrollAtRef.current = Date.now();
+                    requestAnimationFrame(() => {
+                      flatListRef.current?.scrollToEnd({ animated: false });
+                      setTimeout(() => {
+                        isProgrammaticScrollRef.current = false;
+                      }, 250);
+                    });
+                  }
+                } else {
+                  lastMessageHeightRef.current = newHeight;
+                }
+              }
+            : undefined
+        }
+      >
         <Pressable
           onPress={(event) =>
             openUserInfoCard(
@@ -1680,11 +1796,19 @@ export default function ChatroomScreen() {
                 <ActivityIndicator style={styles.loadingMore} color={theme.tint} />
               ) : null
             }
-            onContentSizeChange={() => {
-              if (!pendingScrollToBottomRef.current && hasInitialScrolledRef.current) {
-                return;
+            onContentSizeChange={(w, h) => {
+              // contentSize 变化说明列表内容高度变化（图片加载、字体调整等）。
+              // 如果用户当前在底部或最近刚执行过 scrollToBottom，则保持吸底。
+              // 不再用 pendingScrollToBottomRef 作为唯一标记，避免图片加载后无法再次吸底。
+              if (isAtBottomRef.current) {
+                // 标记为程序触发，避免本次 scrollToEnd 触发 onScroll 后被误判为"不在底部"
+                isProgrammaticScrollRef.current = true;
+                lastProgrammaticScrollAtRef.current = Date.now();
+                flatListRef.current?.scrollToEnd({ animated: false });
+                setTimeout(() => {
+                  isProgrammaticScrollRef.current = false;
+                }, 200);
               }
-              flatListRef.current?.scrollToEnd({ animated: false });
               pendingScrollToBottomRef.current = false;
               hasInitialScrolledRef.current = true;
             }}
