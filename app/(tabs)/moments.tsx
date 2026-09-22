@@ -20,7 +20,6 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -31,6 +30,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Alert } from '@/utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const PAGE_SIZE = 10;
@@ -115,14 +115,11 @@ export default function MomentsScreen() {
         current: p, pageSize: PAGE_SIZE, sortField: 'createTime', sortOrder: 'descend',
         ...(userId != null ? { userId } : {}),
       };
-      console.log('[fetchMoments] 请求参数:', JSON.stringify(params));
       const res = await momentsApi.listMoments(params);
-      console.log('[fetchMoments] 响应:', JSON.stringify(res));
       if (res.code === 0 && res.data) {
         const records = (res.data.records || []).sort(
           (a, b) => (b.isTop || 0) - (a.isTop || 0),
         );
-        console.log('[fetchMoments] 获取到动态数:', records.length, '总数据:', res.data.total);
         setMoments(prev => p === 1 ? records : [...prev, ...records]);
         setPage(p);
         setHasMore(p * PAGE_SIZE < (res.data.total || 0));
@@ -130,7 +127,6 @@ export default function MomentsScreen() {
         records.forEach(m => { if (m.commentNum > 0) loadComments(m.id); });
       } else {
         // non-zero code — stop loading, show empty list
-        console.log('[fetchMoments] 非成功响应:', res.code, res.message);
         if (p === 1) setMoments([]);
         setHasMore(false);
       }
@@ -502,7 +498,6 @@ export default function MomentsScreen() {
     setFilterUserId(targetUserId);
     setFilterUserName(userInfo.userName || '');
     // 先用 userInfo 作为后备显示
-    console.log('[handleViewSelf] userInfo.id:', userInfo.id, 'targetUserId:', targetUserId);
     setLoginUserExtra({
       id: userInfo.id,
       userId: userInfo.id,
@@ -829,16 +824,30 @@ export default function MomentsScreen() {
       {!viewingProfile ? (
         <View style={s.header}>
           <Text style={s.headerTitle}>鱼小圈</Text>
-          {isLoggedIn && (
-            <TouchableOpacity onPress={handleViewSelf} style={s.myCircleBtn}>
-              <Text style={{ color: theme.tint, fontSize: 14, fontWeight: '600' }}>我的</Text>
+          <View style={s.headerRight}>
+            <TouchableOpacity 
+              onPress={() => fetchMoments(1, true, filterUserId ?? undefined)} 
+              style={s.refreshBtn}
+            >
+              <Text style={{ color: theme.tint, fontSize: 20 }}>↻</Text>
             </TouchableOpacity>
-          )}
+            {isLoggedIn && (
+              <TouchableOpacity onPress={handleViewSelf} style={s.myCircleBtn}>
+                <Text style={{ color: theme.tint, fontSize: 14, fontWeight: '600' }}>我的</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       ) : (
         <View style={s.headerCompact}>
           <TouchableOpacity onPress={handleBack} style={s.backBtn}>
             <Text style={[s.backText, { color: theme.tint }]}>‹ 返回</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            onPress={() => fetchMoments(1, true, filterUserId ?? undefined)} 
+            style={s.refreshBtn}
+          >
+            <Text style={{ color: theme.tint, fontSize: 20 }}>↻</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -986,8 +995,18 @@ const screenStyles = (theme: typeof Colors['light']) => StyleSheet.create({
     borderBottomColor: theme.border,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  myCircleBtn: { marginLeft: 'auto' },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 'auto',
+    gap: 12,
+  },
+  refreshBtn: {
+    padding: 4,
+  },
+  myCircleBtn: {},
   backBtn: { paddingRight: 4 },
   backText: { fontSize: 17, fontWeight: '500' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: theme.text },

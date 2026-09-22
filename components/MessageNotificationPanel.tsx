@@ -14,7 +14,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   Modal,
@@ -23,6 +22,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Alert } from '@/utils/alert';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 const PAGE_SIZE = 10;

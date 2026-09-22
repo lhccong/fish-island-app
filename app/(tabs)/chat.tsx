@@ -46,7 +46,6 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   FlatList,
   Image,
@@ -67,6 +66,7 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert } from '@/utils/alert';
 
 const CONNECTION_ID = 'chatroom';
 
@@ -961,8 +961,11 @@ export default function ChatroomScreen() {
           const compressedUri = await compressImage(asset.uri);
 
           // Upload image to server
-          const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+          // 从 mimeType 推断扩展名，而不是从 URI（Web 环境下 URI 是 blob URL）
+          const mimeType = asset.mimeType || asset.type || 'image/jpeg';
+          const ext = mimeType.split('/').pop()?.toLowerCase() || 'jpg';
           const fileName = `image_${Date.now()}.${ext}`;
+          
           const uploadResponse = await chatApi.uploadImage(compressedUri, fileName);
 
           if (uploadResponse && uploadResponse.code === 0) {
@@ -1024,18 +1027,19 @@ export default function ChatroomScreen() {
               Alert.alert('发送失败', '图片消息发送失败，请重试');
             }
           } else {
+            console.error('上传失败，响应码不为0:', uploadResponse);
             throw new Error(uploadResponse?.message || uploadResponse?.msg || '上传失败');
           }
         } catch (uploadError) {
-          console.error('图片上传失败:', uploadError);
-          Alert.alert('上传失败', '图片上传失败，请重试');
+          console.error('图片上传失败详情:', uploadError);
+          Alert.alert('上传失败', `图片上传失败: ${uploadError instanceof Error ? uploadError.message : '未知错误'}`);
         } finally {
           setIsUploading(false);
         }
       }
     } catch (error) {
-      console.error('选择图片失败:', error);
-      Alert.alert('错误', '选择图片时发生错误');
+      console.error('选择图片失败详情:', error);
+      Alert.alert('错误', `选择图片时发生错误: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
 

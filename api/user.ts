@@ -293,7 +293,23 @@ export const userApi = {
     const fileType = mimeType || mimeMap[ext ?? ''] || 'image/jpeg';
 
     const formData = new FormData();
-    formData.append('file', { uri, type: fileType, name: fileName } as any);
+    
+    // 判断是否为 Web 环境（blob URL）
+    if (uri.startsWith('blob:')) {
+      try {
+        // 从 blob URL 获取实际的文件数据
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        // 将 Blob 添加到 FormData
+        formData.append('file', blob, fileName);
+      } catch (error) {
+        console.error('从 blob URL 读取文件失败:', error);
+        throw new Error('无法读取图片文件');
+      }
+    } else {
+      // React Native 环境：使用特定的文件对象格式
+      formData.append('file', { uri, type: fileType, name: fileName } as any);
+    }
 
     const tokenName = await request.getTokenName();
     const tokenValue = await request.getTokenValue();

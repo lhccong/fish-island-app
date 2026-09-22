@@ -316,7 +316,7 @@ class WebSocketManager extends SimpleEventEmitter {
    */
   private startNotification(content: string): number | null {
     // 在 React Native 中使用 console.log 或自定义通知
-    console.log('新消息通知:', content);
+    // console.log('新消息通知:', content);
     return Date.now();
   }
 

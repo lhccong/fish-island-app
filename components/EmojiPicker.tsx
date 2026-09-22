@@ -2,19 +2,19 @@ import { userApi } from '@/api/user';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Alert } from '@/utils/alert';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface EmoticonItem {
@@ -205,11 +205,9 @@ export default function EmojiPicker({ visible, onClose, onSelect, compact }: Emo
   // 搜索在线表情包（使用 CORS 代理）
   const searchOnlineEmojis = async (keyword: string) => {
     if (!keyword.trim()) {
-      console.log('搜索关键词为空');
       return;
     }
     setSearchLoading(true);
-    console.log('开始搜索表情包，关键词:', keyword);
 
     try {
       // 使用 CORS 代理服务访问百度图片搜索
@@ -227,7 +225,6 @@ export default function EmojiPicker({ visible, onClose, onSelect, compact }: Emo
 
       for (const proxyUrl of proxyUrls) {
         try {
-          console.log('尝试代理:', proxyUrl);
           response = await fetch(proxyUrl, {
             method: 'GET',
             headers: {
@@ -235,31 +232,26 @@ export default function EmojiPicker({ visible, onClose, onSelect, compact }: Emo
             },
           });
           if (response.ok) {
-            console.log('代理请求成功');
             break;
           }
         } catch (e) {
-          console.log('代理失败:', proxyUrl, e);
           lastError = e;
         }
       }
 
       if (!response || !response.ok) {
-        throw new Error('所有代理都失败: ' + (lastError?.message || 'Unknown error'));
+        throw new Error('所有代理都失败: ' + (lastError as Error)?.message || 'Unknown error');
       }
 
       const data = await response.json();
-      console.log('搜索返回数据:', JSON.stringify(data).slice(0, 200));
 
       if (data.data && Array.isArray(data.data) && data.data.length > 0) {
         const images = data.data
           .filter((item: any) => item && (item.thumbURL || item.middleURL || item.objURL))
           .map((item: any) => item.thumbURL || item.middleURL || item.objURL)
           .slice(0, 20);
-        console.log('找到图片数量:', images.length);
         setSearchResults(images);
       } else {
-        console.log('未找到图片');
         setSearchResults([]);
       }
     } catch (error) {

@@ -218,8 +218,23 @@ export const chatApi = {
     };
     const fileType = mimeMap[ext ?? ''] ?? 'image/jpeg';
 
-    // React Native 特定的文件对象格式
-    formData.append('file', { uri, type: fileType, name: fileName } as any);
+    // 判断是否为 Web 环境（blob URL）
+    if (uri.startsWith('blob:')) {
+      try {
+        // 从 blob URL 获取实际的文件数据
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        
+        // 将 Blob 添加到 FormData
+        formData.append('file', blob, fileName);
+      } catch (error) {
+        console.error('从 blob URL 读取文件失败:', error);
+        throw new Error('无法读取图片文件');
+      }
+    } else {
+      // React Native 环境：使用特定的文件对象格式
+      formData.append('file', { uri, type: fileType, name: fileName } as any);
+    }
 
     // 获取认证信息
     const tokenName = await request.getTokenName();
@@ -238,18 +253,28 @@ export const chatApi = {
     } else if (apiKey) {
       // 回退到 apiKey
       url += `&apiKey=${apiKey}`;
+    } else {
+      console.warn('没有认证信息！');
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
 
-    if (!response.ok) {
-      throw new Error(`上传失败: ${response.status}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('响应错误内容:', errorText);
+        throw new Error(`上传失败: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('fetch 请求异常:', error);
+      throw error;
     }
-
-    return await response.json();
   },
 };
